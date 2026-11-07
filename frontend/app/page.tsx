@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, CheckCircle2, AlertCircle, Database, Server, ShieldCheck, RefreshCw } from "lucide-react";
+import { Activity, CheckCircle2, AlertCircle, Database, Server, ShieldCheck, RefreshCw, FileText, ArrowRight } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -89,6 +90,13 @@ export default function Home() {
           </div>
 
           <div className="flex items-center space-x-3">
+            <Link
+              href="/documents"
+              className="inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all"
+            >
+              <FileText className="w-3.5 h-3.5 mr-1.5" />
+              Document Registry (Phase 2)
+            </Link>
             <button
               onClick={handleRefresh}
               className="inline-flex items-center text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-100 transition-colors"

@@ -59,6 +59,29 @@ class DocumentRead(DocumentBase):
         return ensure_utc_datetime(v)
 
 
+class DocumentUploadResponse(ProcureMindBaseSchema):
+    """API response returned when a document is uploaded."""
+
+    document: DocumentRead
+    is_duplicate: bool = Field(
+        default=False, description="True if identical file was previously uploaded"
+    )
+    message: str = Field(default="Document uploaded successfully")
+
+
+class DownloadUrlResponse(ProcureMindBaseSchema):
+    """API response containing a short-lived download link."""
+
+    download_url: str = Field(..., description="Short-lived signed URL for downloading document")
+    expires_in_seconds: int = Field(..., description="Duration in seconds before token expires")
+    expires_at: datetime = Field(..., description="Exact UTC timestamp when download link expires")
+
+    @field_validator("expires_at", mode="after")
+    @classmethod
+    def ensure_utc(cls, v: datetime) -> datetime:
+        return ensure_utc_datetime(v)
+
+
 class ExtractedFieldBase(ProcureMindBaseSchema):
     field_name: str = Field(..., max_length=100)
     raw_value: str | None = None

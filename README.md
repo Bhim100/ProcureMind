@@ -33,6 +33,125 @@ PAYPAL/
 
 ---
 
+## System Architecture & Technical Diagrams
+
+> Complete diagrams, entity-relationship models, and sequence flows are cataloged in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+### 1. High-Level Architecture
+
+```mermaid
+flowchart TD
+    subgraph ClientTier ["Client Tier (Browser)"]
+        UI["Next.js App Router (TypeScript, Tailwind, shadcn/ui)"]
+        QueryClient["TanStack Query (Client Cache)"]
+        UI --> QueryClient
+    end
+
+    subgraph APITier ["FastAPI Backend Engine (/api/v1)"]
+        Router["FastAPI Application Router"]
+        CORSMiddleware["Strict CORS Middleware"]
+        AuthStorageService["ObjectStorageInterface (Local / S3)"]
+        DownloadTokenService["Download Token Service (HMAC-SHA256)"]
+        
+        CORSMiddleware --> Router
+        Router --> AuthStorageService
+        Router --> DownloadTokenService
+    end
+
+    subgraph AuthoritativePersistence ["Authoritative Single Source of Truth"]
+        Postgres[("PostgreSQL 16 (Neon Cloud / Local Docker)
+        - Sole authority for all balances & ledger state
+        - NUMERIC(18, 2) fixed precision (No floats)
+        - Timezone-aware UTC timestamps
+        - 14 Normalized relational tables")]
+    end
+
+    subgraph SecureStorage ["Private Document Storage"]
+        LocalStorage["Local Private Directory (./local_storage/private)
+        - Strictly path-contained
+        - Server-generated UUID storage keys
+        - Inaccessible via public web server"]
+    end
+
+    subgraph SecondaryStores ["Optional & Secondary Services (Non-Blocking)"]
+        FalkorDB[("FalkorDB (Knowledge Graph)")]
+        Chroma[("Chroma (Vector Embeddings)")]
+        PayPalSandbox["PayPal REST API (Sandbox Only)"]
+    end
+
+    QueryClient -->|HTTPS REST| CORSMiddleware
+    Router -->|SQLAlchemy 2.0 / Alembic| Postgres
+    AuthStorageService --> LocalStorage
+    Router -.-> FalkorDB
+    Router -.-> Chroma
+    Router -.-> PayPalSandbox
+```
+
+### 2. Financial Proceeds & Allocation Pipeline
+
+```mermaid
+flowchart LR
+    subgraph Stage1 ["Stage 1: Payer Transaction"]
+        PaymentNode["Payment (Gross/Fee/Net)"]
+        Webhook["ProviderWebhookEvent (Unique Event ID)"]
+        Webhook -.-> PaymentNode
+    end
+
+    subgraph Stage2 ["Stage 2: Provider Settlement"]
+        SettlementNode["Settlement (Batch Payout)"]
+        PaymentNode -->|Batched into| SettlementNode
+    end
+
+    subgraph Stage3 ["Stage 3: Bank Verification"]
+        BankNode["BankTransaction (Credit Line / UTR)"]
+        SettlementNode -->|Deposited into| BankNode
+    end
+
+    subgraph AllocationGate ["Stage 4: Governed Allocation"]
+        AllocationNode["Allocation
+        (ck_allocation_single_source)"]
+        InvoiceNode["Invoice (Total / Balance)"]
+        
+        PaymentNode -->|Option A: Direct Capture Link| AllocationNode
+        SettlementNode -.->|Option B: Batch Link| AllocationNode
+        BankNode -.->|Option C: Direct Bank Link| AllocationNode
+        AllocationNode -->|Applies to| InvoiceNode
+    end
+```
+
+### 3. Document Ingestion & Safe Storage Pipeline
+
+```mermaid
+flowchart TD
+    ClientUpload["Client Upload (POST /api/v1/documents)"] --> SizeCheck{"Size <= 15MB?"}
+    SizeCheck -->|No| Err413["413 Payload Too Large"]
+    SizeCheck -->|Yes| EmptyCheck{"File > 0 Bytes?"}
+    EmptyCheck -->|No| Err400_Empty["400 Bad Request: Empty File"]
+    EmptyCheck -->|Yes| ExtCheck{"Allowed Extension?<br/>(pdf, xlsx, csv, png, jpg)"}
+    ExtCheck -->|No| Err400_Ext["400 Bad Request: Unsupported Type"]
+    ExtCheck -->|Yes| TypeInspection{"Format Type"}
+
+    TypeInspection -->|CSV| CSVValidation["Bounded UTF-8 Validation<br/>(Reject null bytes \\x00)"]
+    TypeInspection -->|PDF / Image / Excel| MagicBytes["Binary Magic Bytes Check<br/>(%PDF-, PK\\x03\\x04, PNG, JPG)"]
+
+    CSVValidation -->|Invalid| Err400_Content["400 Bad Request: Malformed"]
+    MagicBytes -->|Mismatch| Err400_Content
+    CSVValidation -->|Valid| HashGen["Compute SHA-256 Digest"]
+    MagicBytes -->|Valid| HashGen
+
+    HashGen --> DupeQuery{"SHA-256 in DB?"}
+    DupeQuery -->|Yes| ReturnExisting["200 OK: Existing Document ID<br/>(is_duplicate = true; 0 disk bloat)"]
+    
+    DupeQuery -->|No| GenKey["Server Storage Key<br/>documents/YYYY/MM/DD/{uuid4}.ext"]
+    GenKey --> ContainmentCheck{"Path Containment<br/>is_relative_to(base_dir)"}
+    ContainmentCheck -->|Traversal Attempt| Err400_Traversal["400 Bad Request"]
+    ContainmentCheck -->|Safe| WriteDisk["Write to Private Storage"]
+    WriteDisk --> InsertDoc["Insert Document (status: 'uploaded')"]
+    InsertDoc --> ReturnCreated["201 Created"]
+```
+
+---
+
 ## Architectural Decisions & System Boundaries
 
 1. **PostgreSQL as Sole Authority**:

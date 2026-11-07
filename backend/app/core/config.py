@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY_ID: str | None = None
     S3_SECRET_ACCESS_KEY: str | None = None
 
+    # Upload Limits & Short-Lived URL Security
+    MAX_UPLOAD_SIZE_BYTES: int = 15 * 1024 * 1024  # 15 MB
+    ALLOWED_FILE_EXTENSIONS: set[str] = {"pdf", "xlsx", "csv", "png", "jpg", "jpeg"}
+    DOWNLOAD_URL_EXPIRES_SECONDS: int = 300  # 5 minutes
+    STORAGE_SIGNING_SECRET: str | None = None
+
     # Secondary Integrations (Optional)
     FALKORDB_ENABLED: bool = False
     FALKORDB_HOST: str = "localhost"
