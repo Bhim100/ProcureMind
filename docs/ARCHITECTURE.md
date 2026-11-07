@@ -397,23 +397,23 @@ sequenceDiagram
     DB-->>API: Document record (id, storage_key, original_filename)
     API->>TokenService: create_download_token(doc_id, expires_at)
     TokenService-->>API: HMAC-SHA256 Token
-    API-->>User: 200 OK { download_url: ".../download?expires=1740000000&token=abc..." }
+    API-->>User: 200 OK with download_url
 
     Note over User,API: User clicks or browser follows signed URL
 
     User->>API: GET /api/v1/documents/{id}/download?expires=...&token=...
     API->>TokenService: verify_download_token(doc_id, expires, token)
     alt Token Expired or HMAC Tampered
-        TokenService-->>API: Invalid / Expired
-        API-->>User: 403 Forbidden ("Invalid or expired download link")
+        TokenService-->>API: Invalid or Expired
+        API-->>User: 403 Forbidden - Invalid or expired link
     else Token Valid
         TokenService-->>API: Valid
         API->>DB: Lookup Document by ID
-        DB-->>API: Document { storage_key, original_filename, media_type }
+        DB-->>API: Document (storage_key, filename)
         API->>Storage: get_file(document.storage_key)
-        Storage->>Storage: Verify path containment (.is_relative_to)
+        Storage->>Storage: Verify path containment
         Storage-->>API: Raw file bytes
-        API-->>User: 200 OK (Content-Disposition: attachment; filename="sanitized.pdf")
+        API-->>User: 200 OK with file attachment stream
     end
 ```
 
@@ -434,8 +434,8 @@ sequenceDiagram
     Exporter->>NextJS: Uploads Commercial Invoice (PDF)
     NextJS->>Backend: POST /api/v1/documents (multipart)
     Backend->>Backend: Validate format, hash SHA-256, write private storage
-    Backend->>DB: Insert Document (status: 'uploaded')
-    Backend-->>NextJS: 201 Created (Document ID)
+    Backend->>DB: Insert Document with status uploaded
+    Backend-->>NextJS: 201 Created with Document ID
 
     Note over Backend,DB: Phase 3 & 4: Parsing & LLM Extraction (Upcoming)
     Backend->>Backend: Deterministic text parsing / OCR / LLM validation
@@ -444,9 +444,9 @@ sequenceDiagram
     Note over Backend,DB: Phase 7: Deterministic Reconciliation
     Backend->>DB: Match Invoice against ShippingBill & PayPal Payment
     alt Perfect 3-Way Match
-        Backend->>DB: Create Allocation (review_status: 'approved')
+        Backend->>DB: Create Allocation with approved review_status
     else Discrepancy Found (Amount or Fee variance)
-        Backend->>DB: Create Discrepancy (severity: 'error') & EvidenceReferences
+        Backend->>DB: Create Discrepancy with severity error & EvidenceReferences
         Backend->>NextJS: Flag in Review Workspace
         Auditor->>NextJS: Inspects side-by-side evidence
         Auditor->>Backend: POST /decisions (Human Approval / Override)
