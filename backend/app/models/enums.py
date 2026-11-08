@@ -146,3 +146,34 @@ class TargetType(str, Enum):
     DISCREPANCY = "discrepancy"
     ALLOCATION = "allocation"
     DOCUMENT = "document"
+    TRANSACTION_LINK = "transaction_link"
+    INVOICE = "invoice"
+    SHIPPING_BILL = "shipping_bill"
+    PAYMENT = "payment"
+    SETTLEMENT = "settlement"
+    BANK_TRANSACTION = "bank_transaction"
+
+
+class LinkType(str, Enum):
+    """Supported typed relationship pairs connecting domain trade records."""
+
+    INVOICE_SHIPPING_BILL = "invoice_shipping_bill"
+    INVOICE_PAYMENT = "invoice_payment"
+    PAYMENT_SETTLEMENT = "payment_settlement"
+    BANK_TRANSACTION_PAYMENT = "bank_transaction_payment"
+    BANK_TRANSACTION_SETTLEMENT = "bank_transaction_settlement"
+
+
+class LinkStatus(str, Enum):
+    """Lifecycle review state of a trade relationship link."""
+
+    PROPOSED = "proposed"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+
+
+class LinkMethod(str, Enum):
+    """Origin method of a relationship link."""
+
+    AUTO_EXACT = "auto_exact"
+    MANUAL = "manual"

@@ -8,27 +8,33 @@ ProcureMind is an autonomous financial reconciliation engine designed for invoic
 PAYPAL/
 ├── backend/                  # FastAPI Application (Python, SQLAlchemy 2.0, Alembic)
 │   ├── app/
-│   │   ├── api/              # API routes (v1 health, readiness, and future endpoints)
-│   │   ├── core/             # Configuration, CORS, database engine & session
+│   │   ├── api/              # API routes (health, documents, transactions)
+│   │   ├── core/             # Configuration, CORS, database engine, normalization
+│   │   ├── models/           # Domain models (export, payment, reconciliation, relationship)
+│   │   ├── schemas/          # Pydantic v2 schemas for all payloads & responses
+│   │   ├── services/         # Document service, relationship service, seed scenarios
 │   │   ├── storage/          # Document object storage abstraction & implementations
-│   │   └── main.py           # FastAPI ASGI entrypoint & middleware setup
-│   ├── migrations/           # Alembic database migrations
-│   ├── tests/                # Automated pytest suite
+│   │   └── main.py           # FastAPI ASGI entrypoint, middleware, and redirects
+│   ├── migrations/           # Alembic database migrations (0001_phase1, 0002_phase3)
+│   ├── tests/                # Automated pytest suite (45 tests across Phase 1, 2, 3)
 │   ├── alembic.ini           # Alembic database migration config
 │   ├── pyproject.toml        # uv / Python project metadata & dependencies
 │   ├── .env.example          # Backend environment placeholders
 │   └── README.md             # Backend development guide
 ├── frontend/                 # Next.js App Router (TypeScript, Tailwind, TanStack Query)
-│   ├── app/                  # App Router pages, layout, TanStack Query providers
-│   ├── lib/                  # Utilities (cn helper)
+│   ├── app/                  # App Router pages (/, /documents), layout, Query providers
+│   ├── lib/                  # API client & UI utilities
 │   ├── components.json       # shadcn/ui configuration
 │   ├── package.json          # Node dependencies (pnpm)
 │   ├── tailwind.config.ts    # Tailwind CSS styling config
 │   ├── tsconfig.json         # TypeScript configuration
 │   ├── .env.example          # Frontend environment placeholders
 │   └── README.md             # Frontend development guide
+├── docs/                     # Persistent architecture diagrams & specifications
+│   ├── ARCHITECTURE.md       # Technical architecture, ER models, sequence diagrams
+│   └── PHASES.md             # Multi-phase delivery prompts & verification gates
 ├── .gitignore                # Global git ignore covering secrets, node_modules, .venv, data
-└── README.md                 # System architecture and Phase 0 foundation documentation
+└── README.md                 # System overview and implementation guide
 ```
 
 ---
@@ -274,42 +280,49 @@ Frontend application will be available at: [http://localhost:3000](http://localh
 
 ---
 
-## Dependency-Aware Phase Plan
+## Multi-Phase Implementation Status
 
-- **Phase 0: Architecture & Foundation** *(Current Phase - Completed)*
-  - Establish monorepo structure, package managers (`uv`, `pnpm`), gitignore rules, environment examples.
-  - Implement FastAPI health/readiness endpoints, strict CORS, and storage abstraction.
-  - Implement Next.js App Router minimal shell with TanStack Query diagnostics.
-  - Zero business logic, domain models, or credentials committed.
+- **Phase 0: Architecture & Foundation** *(Completed)*
+  - Monorepo structure, package managers (`uv`, `pnpm`), gitignore rules, environment examples.
+  - FastAPI health/readiness endpoints, strict CORS, and storage abstraction.
+  - Next.js App Router shell with TanStack Query diagnostics.
 
-- **Phase 1: Persistence & Storage Foundation**
-  - Define PostgreSQL relational schema via SQLAlchemy 2.0 (Vendors, Purchase Orders, Invoices, Delivery Receipts, Line Items, Audit Provenance).
-  - Implement initial Alembic migration (`001_initial_schema.py`) with full up/down scripts.
-  - Implement file upload intake pipeline adhering to `ObjectStorageInterface`.
+- **Phase 1: Persistence & Provenance Foundation** *(Completed)*
+  - PostgreSQL 16 relational schema via SQLAlchemy 2.0 (14 normalized domain models across export, payment, document, and reconciliation domains).
+  - Versioned Alembic migration `0001_phase1_domain_models.py`.
+  - Synthetic demo seed scenario pack covering 6 cross-border trade scenarios.
 
-- **Phase 2: Document Processing & Extraction Engine**
-  - Implement document parsing engine (PyMuPDF for text, pdfplumber for tabular data, openpyxl for spreadsheets, OCR fallback).
-  - Structured extraction using Pydantic v2 schemas and versioned prompt files.
-  - Provenance capture (page, row, bbox, extraction confidence, review status flag).
+- **Phase 2: Document Ingestion, Registry & Safe Storage** *(Completed)*
+  - Multipart document upload (`POST /api/v1/documents`) with size enforcement (15MB), format verification (magic bytes & bounded UTF-8), and SHA-256 deduplication.
+  - Strictly path-contained local filesystem private storage and HMAC-SHA256 short-lived download token signing.
+  - Next.js upload workspace at `/documents` with drag-and-drop, status badges, and documents table.
 
-- **Phase 3: Reconciliation & Matching Engine**
-  - Deterministic 3-way matching rules (PO vs. Invoice vs. Delivery Receipt) using Decimal currency arithmetic.
-  - Discrepancy taxonomy and categorization (unit price variance, quantity mismatch, missing line items).
-  - Grounded AI exception explanations strictly anchored to extracted document context.
+- **Phase 3: PostgreSQL Transaction Relationships & Link Discovery** *(Completed)*
+  - Typed relationship entity `TransactionLink` linking invoices, shipping bills, payments, settlements, and bank statement lines.
+  - Database CHECK constraint `ck_transaction_link_typed_pair` guaranteeing exactly two valid typed foreign keys per link.
+  - Deduplication via PostgreSQL partial unique indexes (`uq_tx_link_inv_sb`, `uq_tx_link_inv_pay`, etc.).
+  - Read-only exact-reference auto-discovery (`POST /api/v1/transactions/{id}/discover-links`) creating `proposed` links (never auto-confirmed).
+  - Human review governance via `POST /api/v1/transactions/{id}/links/{link_id}/decision`, recording immutable `HumanDecision` audit logs.
+  - Concrete transaction ownership model with explicit assignment via `POST /api/v1/transactions/{id}/assign-record` and cross-deal blocking.
+  - Deletion protection (`ondelete="RESTRICT"`) preventing cascade-deletion of audit history.
+  - Versioned Alembic migration `0002_phase3_transaction_links.py`.
+  - FalkorDB deferred entirely; PostgreSQL is the sole relationship authority.
 
-- **Phase 4: FalkorDB Secondary Visualization & Audit Graph**
-  - Secondary graph indexing in FalkorDB mirroring PostgreSQL entities by ID.
-  - Non-blocking asynchronous event updates; failures in graph writes do not block transaction completion.
+- **Phase 4: Parsing & LLM Structured Extraction** *(Next Phase)*
+  - Document parsing (PyMuPDF for text, pdfplumber for tables, openpyxl for spreadsheets, OCR fallback).
+  - Validated LLM structured extraction into Pydantic schemas with arithmetic validation.
 
-- **Phase 5: PayPal Sandbox Payment Integration**
-  - PayPal REST API integration (Sandbox environment only) for verified matching payouts.
-  - Webhook listener for payment execution status and dispute logging.
-  - Explicit compliance disclosures (Sandbox-only disclaimers; no automated regulatory clearance claims).
+- **Phase 5: Bank Statement Extraction**
+  - Extraction pipeline for multi-format bank statements, Indian digit grouping, and running balance validation.
 
-- **Phase 6: Frontend Reconciliation & Review Workspace**
-  - Split-pane review UI showing document viewer and extracted line item comparison.
-  - Discrepancy flagging, manual line adjustment, and human-in-the-loop approval workflow.
-  - Real-time status updates via TanStack Query.
+- **Phase 6: FalkorDB Secondary Graph Visualization & Chroma Embeddings**
+  - Non-blocking secondary graph indexing and vector similarity search.
+
+- **Phase 7: Reconciliation & Automated Matching Engine**
+  - Multi-way matching rules, discrepancy categorization, and governed candidate matching.
+
+- **Phase 8: PayPal Sandbox Payment Integration**
+  - Webhook verification, capture tracking, and human-authorized sandbox payouts.
 
 ---
 

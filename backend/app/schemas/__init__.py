@@ -56,6 +56,24 @@ from app.schemas.reconciliation import (
     HumanDecisionCreate,
     HumanDecisionRead,
 )
+from app.schemas.relationship import (
+    DiscoveryResponse,
+    LinkDecisionRequest,
+    RecordAssignmentRequest,
+    RecordAssignmentResponse,
+    TransactionLinkBase,
+    TransactionLinkCreate,
+    TransactionLinkRead,
+    UnlinkedRecordReport,
+)
+from app.schemas.transaction import (
+    BankTransactionWithLinkStatus,
+    InvoiceWithLinkStatus,
+    PaymentWithLinkStatus,
+    SettlementWithLinkStatus,
+    ShippingBillWithLinkStatus,
+    TransactionDetailRead,
+)
 
 __all__ = [
     # Reconciliation
@@ -66,8 +84,11 @@ __all__ = [
     "BankTransactionBase",
     "BankTransactionCreate",
     "BankTransactionRead",
+    # Relationship & Transaction
+    "BankTransactionWithLinkStatus",
     # Common
     "CurrencyCode",
+    "DiscoveryResponse",
     "DiscrepancyBase",
     "DiscrepancyCreate",
     "DiscrepancyRead",
@@ -97,18 +118,30 @@ __all__ = [
     "InvoiceLineItemCreate",
     "InvoiceLineItemRead",
     "InvoiceRead",
+    "InvoiceWithLinkStatus",
+    "LinkDecisionRequest",
     "MoneyAmount",
     "PaymentBase",
     "PaymentCreate",
     "PaymentRead",
+    "PaymentWithLinkStatus",
     "ProcureMindBaseSchema",
     "ProviderWebhookEventBase",
     "ProviderWebhookEventCreate",
     "ProviderWebhookEventRead",
+    "RecordAssignmentRequest",
+    "RecordAssignmentResponse",
     "SettlementBase",
     "SettlementCreate",
     "SettlementRead",
+    "SettlementWithLinkStatus",
     "ShippingBillBase",
     "ShippingBillCreate",
     "ShippingBillRead",
+    "ShippingBillWithLinkStatus",
+    "TransactionDetailRead",
+    "TransactionLinkBase",
+    "TransactionLinkCreate",
+    "TransactionLinkRead",
+    "UnlinkedRecordReport",
 ]

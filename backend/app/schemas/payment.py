@@ -35,6 +35,7 @@ class BankTransactionBase(ProcureMindBaseSchema):
     transaction_type: BankTransactionType = BankTransactionType.CREDIT
     status: BankTransactionStatus = BankTransactionStatus.POSTED
     remittance_reference: str | None = Field(None, max_length=255)
+    export_transaction_id: uuid.UUID | None = None
     is_demo: bool = False
 
     @field_validator("currency")
@@ -75,6 +76,7 @@ class SettlementBase(ProcureMindBaseSchema):
     settlement_date: date
     status: SettlementStatus = SettlementStatus.COMPLETED
     remittance_reference: str | None = Field(None, max_length=255)
+    export_transaction_id: uuid.UUID | None = None
     is_demo: bool = False
 
     @field_validator("currency")
@@ -120,6 +122,7 @@ class PaymentBase(ProcureMindBaseSchema):
     status: PaymentStatus = PaymentStatus.COMPLETED
     event_time: datetime | None = None
     environment: EnvironmentLabel = EnvironmentLabel.SANDBOX
+    export_transaction_id: uuid.UUID | None = None
     is_demo: bool = False
 
     @field_validator("currency")

@@ -21,7 +21,9 @@ from app.models.base import GUID, Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import TransactionStatus
 
 if TYPE_CHECKING:
+    from app.models.payment import BankTransaction, Payment, Settlement
     from app.models.reconciliation import Allocation
+    from app.models.relationship import TransactionLink
 
 
 class ExportTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -84,6 +86,22 @@ class ExportTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "ShippingBill",
         back_populates="export_transaction",
         cascade="all, delete-orphan",
+    )
+    payments: Mapped[list["Payment"]] = relationship(
+        "Payment",
+        back_populates="export_transaction",
+    )
+    settlements: Mapped[list["Settlement"]] = relationship(
+        "Settlement",
+        back_populates="export_transaction",
+    )
+    bank_transactions: Mapped[list["BankTransaction"]] = relationship(
+        "BankTransaction",
+        back_populates="export_transaction",
+    )
+    links: Mapped[list["TransactionLink"]] = relationship(
+        "TransactionLink",
+        back_populates="export_transaction",
     )
 
 

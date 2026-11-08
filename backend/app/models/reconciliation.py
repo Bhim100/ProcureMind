@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from app.models.document import Document, ExtractedField
     from app.models.export import Invoice
     from app.models.payment import BankTransaction, Payment, Settlement
+    from app.models.relationship import TransactionLink
 
 
 class Allocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -278,6 +279,13 @@ class EvidenceReference(Base, UUIDPrimaryKeyMixin):
         index=True,
         comment="Optional parent Allocation supported by this evidence",
     )
+    transaction_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("transaction_links.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Optional parent TransactionLink supported by this evidence",
+    )
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
         ForeignKey("documents.id", ondelete="SET NULL"),
@@ -352,6 +360,11 @@ class EvidenceReference(Base, UUIDPrimaryKeyMixin):
     allocation: Mapped["Allocation | None"] = relationship(
         "Allocation",
         back_populates="evidence_references",
+    )
+    transaction_link: Mapped["TransactionLink | None"] = relationship(
+        "TransactionLink",
+        back_populates="evidence_references",
+        foreign_keys=[transaction_link_id],
     )
     document: Mapped["Document | None"] = relationship(
         "Document",

@@ -35,15 +35,21 @@ from app.models.enums import (
 from app.models.export import ExportTransaction, Invoice, InvoiceLineItem, ShippingBill
 from app.models.payment import BankTransaction, Payment, ProviderWebhookEvent, Settlement
 from app.models.reconciliation import Allocation, Discrepancy, EvidenceReference, HumanDecision
+from app.models.relationship import TransactionLink
 
 
 def clear_demo_data(db: Session) -> None:
     """Removes any previously seeded demo records (where is_demo=True)."""
-    # Delete dependent reconciliation entities
+    # Delete dependent reconciliation and relationship entities
     db.query(EvidenceReference).filter(
         (EvidenceReference.discrepancy.has(Discrepancy.is_demo == True))
         | (EvidenceReference.allocation.has(Allocation.is_demo == True))
+        | (EvidenceReference.transaction_link.has(TransactionLink.is_demo == True))
     ).delete(synchronize_session=False)
+
+    db.query(TransactionLink).filter(TransactionLink.is_demo == True).delete(
+        synchronize_session=False
+    )
 
     db.query(HumanDecision).filter(HumanDecision.reviewer_label == "demo_auditor").delete(
         synchronize_session=False
@@ -174,6 +180,7 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
     db.add(sb_1)
 
     pmt_1 = Payment(
+        export_transaction_id=exp_1.id,
         provider="paypal",
         provider_order_id="ORD-DEMO-1001",
         provider_capture_id="CAP-DEMO-1001",
@@ -258,6 +265,7 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
     db.flush()
 
     pmt_2 = Payment(
+        export_transaction_id=exp_2.id,
         provider="paypal",
         provider_order_id="ORD-DEMO-2001",
         provider_capture_id="CAP-DEMO-2001",
@@ -330,6 +338,7 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
     db.flush()
 
     bank_txn_3 = BankTransaction(
+        export_transaction_id=exp_3.id,
         bank_reference="BANK-DEMO-301",
         currency="USD",
         amount=Decimal("485.00"),
@@ -343,6 +352,7 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
     db.flush()
 
     settle_3 = Settlement(
+        export_transaction_id=exp_3.id,
         provider_reference="SETTLE-DEMO-301",
         bank_transaction_id=bank_txn_3.id,
         currency="USD",
@@ -356,6 +366,7 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
     db.flush()
 
     pmt_3 = Payment(
+        export_transaction_id=exp_3.id,
         provider="paypal",
         settlement_id=settle_3.id,
         provider_order_id="ORD-DEMO-3001",
@@ -418,6 +429,7 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
     db.flush()
 
     pmt_4 = Payment(
+        export_transaction_id=exp_4.id,
         provider="paypal",
         provider_order_id="ORD-DEMO-4001",
         provider_capture_id="CAP-DEMO-4001",

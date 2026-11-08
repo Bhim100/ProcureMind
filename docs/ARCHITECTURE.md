@@ -83,6 +83,10 @@ erDiagram
     
     ExportTransaction ||--o{ Invoice : "covers"
     ExportTransaction ||--o{ ShippingBill : "declares"
+    ExportTransaction ||--o{ Payment : "receives"
+    ExportTransaction ||--o{ Settlement : "settles"
+    ExportTransaction ||--o{ BankTransaction : "deposits"
+    ExportTransaction ||--o{ TransactionLink : "scopes"
     Invoice ||--o{ InvoiceLineItem : "contains"
     
     Settlement ||--o{ Payment : "batches"
@@ -90,6 +94,14 @@ erDiagram
     
     Payment ||--o{ ProviderWebhookEvent : "triggers"
     
+    TransactionLink ||--o| Invoice : "invoice_id"
+    TransactionLink ||--o| ShippingBill : "shipping_bill_id"
+    TransactionLink ||--o| Payment : "payment_id"
+    TransactionLink ||--o| Settlement : "settlement_id"
+    TransactionLink ||--o| BankTransaction : "bank_transaction_id"
+    TransactionLink ||--o{ EvidenceReference : "supported_by"
+    TransactionLink ||--o{ HumanDecision : "decided_by"
+
     Invoice ||--o{ Allocation : "settled_by"
     Payment ||--o{ Allocation : "allocates_from"
     Settlement ||--o{ Allocation : "allocates_from"
@@ -97,6 +109,7 @@ erDiagram
     
     Discrepancy ||--o{ EvidenceReference : "supported_by"
     Allocation ||--o{ EvidenceReference : "supported_by"
+    EvidenceReference }o--|| TransactionLink : "proves"
     
     Discrepancy ||--o{ HumanDecision : "adjudicated_by"
     Allocation ||--o{ HumanDecision : "adjudicated_by"
@@ -184,6 +197,7 @@ erDiagram
 
     BankTransaction {
         uuid id PK
+        uuid export_transaction_id FK
         string bank_reference UK
         string currency
         numeric amount
@@ -196,6 +210,7 @@ erDiagram
 
     Settlement {
         uuid id PK
+        uuid export_transaction_id FK
         string provider_reference UK
         uuid bank_transaction_id FK
         string currency
@@ -208,6 +223,7 @@ erDiagram
 
     Payment {
         uuid id PK
+        uuid export_transaction_id FK
         string provider
         uuid settlement_id FK
         string provider_order_id
@@ -273,6 +289,7 @@ erDiagram
         uuid id PK
         uuid discrepancy_id FK
         uuid allocation_id FK
+        uuid transaction_link_id FK
         uuid document_id FK
         uuid extracted_field_id FK
         string source_record_type
@@ -284,6 +301,23 @@ erDiagram
         text normalized_value
         string extraction_method
         string review_state
+    }
+
+    TransactionLink {
+        uuid id PK
+        uuid export_transaction_id FK
+        string link_type
+        string link_method
+        string status
+        uuid invoice_id FK
+        uuid shipping_bill_id FK
+        uuid payment_id FK
+        uuid settlement_id FK
+        uuid bank_transaction_id FK
+        string explicit_reference
+        string normalized_reference
+        text evidence_notes
+        boolean is_demo
     }
 ```
 
@@ -419,7 +453,87 @@ sequenceDiagram
 
 ---
 
-## 6. End-to-End Trade Lifecycle Sequence
+## 6. Transaction Relationships & Link Discovery Architecture (Phase 3)
+
+Phase 3 establishes typed, verifiable relationships connecting commercial invoices, customs shipping bills, payment captures, provider payout settlements, and bank statement credits strictly within PostgreSQL (deferring FalkorDB entirely).
+
+```mermaid
+flowchart TD
+    subgraph DealContext ["ExportTransaction Scope"]
+        Deal["ExportTransaction (EXP-2026-001)"]
+        Inv["Invoice (INV-2026-001)"]
+        SB["ShippingBill (SB-1001)"]
+        Pay["Payment (CAP-1001)"]
+        
+        Deal -->|export_transaction_id| Inv
+        Deal -->|export_transaction_id| SB
+        Deal -->|export_transaction_id| Pay
+    end
+
+    subgraph AutoDiscovery ["Exact-Reference Auto-Discovery (/discover-links)"]
+        Norm{"normalize(invoice_number) == normalize(invoice_reference)?"}
+        Inv -.-> Norm
+        SB -.-> Norm
+        
+        Norm -->|Exact Single Match| CreateProposed["Create TransactionLink (status: proposed, method: auto_exact)"]
+        Norm -->|Ambiguous Match >1| AmbiguousReport["Return Candidate IDs in unlinked_records (0 links created)"]
+        Norm -->|Missing or Conflicting| UnlinkedReport["Return Explanatory Reason in unlinked_records"]
+    end
+
+    subgraph DBIntegrity ["PostgreSQL Engine Guarantees"]
+        CK1["CHECK ck_transaction_link_typed_pair (Exactly 2 FKs populated)"]
+        CK2["CHECK ck_transaction_link_reference_required_for_auto_exact"]
+        UQ["Partial Unique Indexes (uq_tx_link_inv_sb, etc.)"]
+        Restrict["ondelete RESTRICT (Audit history cannot be cascade-deleted)"]
+    end
+
+    subgraph Governance ["Human Oversight Gate (/decision)"]
+        Reviewer["Human Auditor"] -->|POST decision| Decide{"Decision"}
+        Decide -->|Approved| Confirmed["status: confirmed + HumanDecision Row"]
+        Decide -->|Rejected| Rejected["status: rejected + HumanDecision Row"]
+    end
+
+    CreateProposed --> DBIntegrity
+    CreateProposed --> Governance
+```
+
+### Relationship Discovery & Human Decision Sequence Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Auditor as Human Auditor
+    participant UI as Web Client / Swagger UI
+    participant API as FastAPI Backend (/api/v1/transactions)
+    participant RelService as Relationship Service
+    participant DB as PostgreSQL (Sole Authority)
+
+    Note over Auditor,DB: 1. Automated Link Discovery
+    Auditor->>UI: Triggers Link Discovery
+    UI->>API: POST /api/v1/transactions/{id}/discover-links
+    API->>RelService: discover_transaction_links(tx_id)
+    RelService->>DB: Query owned Invoices, ShippingBills, Payments
+    DB-->>RelService: Records belonging to transaction
+    RelService->>RelService: Compare normalized references
+    RelService->>DB: Insert proposed TransactionLink (status: proposed)
+    DB-->>RelService: Created links
+    RelService-->>API: DiscoveryResponse (created, existing, unlinked)
+    API-->>UI: 200 OK with proposed links
+
+    Note over Auditor,DB: 2. Human Review & Decision
+    Auditor->>UI: Reviews proposed link and evidence
+    UI->>API: POST /api/v1/transactions/{id}/links/{link_id}/decision
+    API->>RelService: apply_link_decision(link_id, decision: approved)
+    RelService->>DB: Update TransactionLink status to confirmed
+    RelService->>DB: Insert HumanDecision audit record
+    DB-->>RelService: Confirmed link & audit row
+    RelService-->>API: Updated TransactionLink
+    API-->>UI: 200 OK with confirmed link
+```
+
+---
+
+## 7. End-to-End Trade Lifecycle Sequence
 
 ```mermaid
 sequenceDiagram

@@ -27,6 +27,7 @@ from app.models.enums import (
 )
 
 if TYPE_CHECKING:
+    from app.models.export import ExportTransaction
     from app.models.reconciliation import Allocation
 
 
@@ -79,6 +80,13 @@ class BankTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         comment="Narration / description text extracted from the bank statement line",
     )
+    export_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("export_transactions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Parent export deal context if explicitly assigned",
+    )
     is_demo: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
@@ -87,6 +95,10 @@ class BankTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     # Relationships
+    export_transaction: Mapped["ExportTransaction | None"] = relationship(
+        "ExportTransaction",
+        foreign_keys=[export_transaction_id],
+    )
     settlements: Mapped[list["Settlement"]] = relationship(
         "Settlement",
         back_populates="bank_transaction",
@@ -146,6 +158,13 @@ class Settlement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         comment="Payout reference / description on provider statement",
     )
+    export_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("export_transactions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Parent export deal context if explicitly assigned",
+    )
     is_demo: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
@@ -154,6 +173,10 @@ class Settlement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     # Relationships
+    export_transaction: Mapped["ExportTransaction | None"] = relationship(
+        "ExportTransaction",
+        foreign_keys=[export_transaction_id],
+    )
     bank_transaction: Mapped["BankTransaction | None"] = relationship(
         "BankTransaction",
         back_populates="settlements",
@@ -248,6 +271,13 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         comment="Environment label: sandbox, live, simulated",
     )
+    export_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("export_transactions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Parent export deal context if explicitly assigned",
+    )
     is_demo: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
@@ -256,6 +286,10 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     # Relationships
+    export_transaction: Mapped["ExportTransaction | None"] = relationship(
+        "ExportTransaction",
+        foreign_keys=[export_transaction_id],
+    )
     settlement: Mapped["Settlement | None"] = relationship(
         "Settlement",
         back_populates="payments",

@@ -18,6 +18,9 @@ from app.models.enums import (
     DocumentType,
     EnvironmentLabel,
     ExtractionMethod,
+    LinkMethod,
+    LinkStatus,
+    LinkType,
     PaymentStatus,
     ProcessingStatus,
     ReviewState,
@@ -28,6 +31,7 @@ from app.models.enums import (
 from app.models.export import ExportTransaction, Invoice, InvoiceLineItem, ShippingBill
 from app.models.payment import BankTransaction, Payment, ProviderWebhookEvent, Settlement
 from app.models.reconciliation import Allocation, Discrepancy, EvidenceReference, HumanDecision
+from app.models.relationship import TransactionLink
 
 __all__ = [
     "GUID",
@@ -59,6 +63,10 @@ __all__ = [
     "HumanDecision",
     "Invoice",
     "InvoiceLineItem",
+    # Relationships
+    "LinkMethod",
+    "LinkStatus",
+    "LinkType",
     "Payment",
     "PaymentStatus",
     "ProcessingStatus",
@@ -69,6 +77,7 @@ __all__ = [
     "ShippingBill",
     "TargetType",
     "TimestampMixin",
+    "TransactionLink",
     "TransactionStatus",
     "UUIDPrimaryKeyMixin",
 ]
