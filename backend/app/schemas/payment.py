@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
-from app.core.currencies import validate_currency_code
+from app.core.currencies import validate_currency_code, validate_currency_scale
 from app.models.enums import (
     BankTransactionStatus,
     BankTransactionType,
@@ -51,6 +51,12 @@ class BankTransactionBase(ProcureMindBaseSchema):
             raise ValueError("Bank transaction amount must be greater than zero")
         return val
 
+    @model_validator(mode="after")
+    def validate_precision(self) -> "BankTransactionBase":
+        if self.currency and self.amount is not None:
+            validate_currency_scale(self.amount, self.currency)
+        return self
+
 
 class BankTransactionCreate(BankTransactionBase):
     pass
@@ -91,6 +97,12 @@ class SettlementBase(ProcureMindBaseSchema):
         if val <= Decimal("0.00"):
             raise ValueError("Settlement amount must be greater than zero")
         return val
+
+    @model_validator(mode="after")
+    def validate_precision(self) -> "SettlementBase":
+        if self.currency and self.amount is not None:
+            validate_currency_scale(self.amount, self.currency)
+        return self
 
 
 class SettlementCreate(SettlementBase):
@@ -144,6 +156,13 @@ class PaymentBase(ProcureMindBaseSchema):
             raise ValueError(
                 f"Net amount ({self.net_amount}) does not equal gross ({self.gross_amount}) minus fee ({self.fee_amount}) = {calculated_net}"
             )
+        if self.currency:
+            if self.gross_amount is not None:
+                validate_currency_scale(self.gross_amount, self.currency)
+            if self.fee_amount is not None:
+                validate_currency_scale(self.fee_amount, self.currency)
+            if self.net_amount is not None:
+                validate_currency_scale(self.net_amount, self.currency)
         return self
 
 

@@ -21,6 +21,7 @@ from app.models.enums import (
     LinkMethod,
     LinkStatus,
     LinkType,
+    MatchStatus,
     PaymentStatus,
     ProcessingStatus,
     ReviewState,
@@ -30,7 +31,13 @@ from app.models.enums import (
 )
 from app.models.export import ExportTransaction, Invoice, InvoiceLineItem, ShippingBill
 from app.models.payment import BankTransaction, Payment, ProviderWebhookEvent, Settlement
-from app.models.reconciliation import Allocation, Discrepancy, EvidenceReference, HumanDecision
+from app.models.reconciliation import (
+    Allocation,
+    Discrepancy,
+    EvidenceReference,
+    HumanDecision,
+    ReconciliationMatch,
+)
 from app.models.relationship import TransactionLink
 
 __all__ = [
@@ -67,10 +74,12 @@ __all__ = [
     "LinkMethod",
     "LinkStatus",
     "LinkType",
+    "MatchStatus",
     "Payment",
     "PaymentStatus",
     "ProcessingStatus",
     "ProviderWebhookEvent",
+    "ReconciliationMatch",
     "ReviewState",
     "Settlement",
     "SettlementStatus",

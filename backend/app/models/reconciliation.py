@@ -16,9 +16,11 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
     Text,
@@ -36,13 +38,14 @@ from app.models.enums import (
     DiscrepancySeverity,
     DiscrepancyStatus,
     ExtractionMethod,
+    MatchStatus,
     ReviewState,
     TargetType,
 )
 
 if TYPE_CHECKING:
     from app.models.document import Document, ExtractedField
-    from app.models.export import Invoice
+    from app.models.export import ExportTransaction, Invoice, ShippingBill
     from app.models.payment import BankTransaction, Payment, Settlement
     from app.models.relationship import TransactionLink
 
@@ -62,36 +65,43 @@ class Allocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         GUID(),
-        ForeignKey("invoices.id", ondelete="CASCADE"),
+        ForeignKey("invoices.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
         comment="Target commercial invoice receiving this allocated settlement",
     )
     payment_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("payments.id", ondelete="CASCADE"),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Source Payment record if allocated directly from a provider capture",
     )
     settlement_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("settlements.id", ondelete="CASCADE"),
+        ForeignKey("settlements.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Source Settlement batch if allocated from a provider payout",
     )
     bank_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("bank_transactions.id", ondelete="CASCADE"),
+        ForeignKey("bank_transactions.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Source BankTransaction if allocated from a bank statement line",
     )
     allocated_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
-        comment="Monetary value allocated against the invoice balance",
+        comment="Monetary value allocated against the invoice balance (strictly positive)",
+    )
+    is_reversal: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        index=True,
+        comment="Flag indicating if this allocation is an approved compensating reversal offset",
     )
     currency: Mapped[str] = mapped_column(
         String(3),
@@ -147,6 +157,175 @@ class Allocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "CASE WHEN bank_transaction_id IS NOT NULL THEN 1 ELSE 0 END) = 1",
             name="ck_allocation_single_source",
         ),
+        CheckConstraint("allocated_amount > 0", name="ck_allocation_amount_positive"),
+    )
+
+
+class ReconciliationMatch(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Represents a proposed or confirmed match between trade documents and financial proceeds.
+
+    Covers exact matches, partial matches, ambiguous candidates, and compensating reversals.
+    """
+
+    __tablename__ = "reconciliation_matches"
+
+    export_transaction_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("export_transactions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="Parent export deal context",
+    )
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("invoices.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Target commercial invoice",
+    )
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Source payment capture",
+    )
+    settlement_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("settlements.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Source settlement payout batch",
+    )
+    bank_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("bank_transactions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Source bank statement credit",
+    )
+    shipping_bill_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("shipping_bills.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Source customs shipping bill",
+    )
+    allocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("allocations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Official ledger allocation record created upon human approval",
+    )
+    match_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Match type: invoice_payment, payment_reversal, flow_verification, etc.",
+    )
+    match_status: Mapped[MatchStatus] = mapped_column(
+        SQLEnum(MatchStatus, name="match_status_enum"),
+        nullable=False,
+        index=True,
+        comment="Status: matched, partial, ambiguous, unmatched, requires_human_review",
+    )
+    review_status: Mapped[AllocationReviewStatus] = mapped_column(
+        SQLEnum(AllocationReviewStatus, name="allocation_review_status_enum"),
+        default=AllocationReviewStatus.SUGGESTED,
+        nullable=False,
+        index=True,
+        comment="Review state: suggested, approved, rejected, superseded",
+    )
+    allocated_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+        comment="Proposed or approved allocation monetary value (non-negative)",
+    )
+    is_reversal: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        index=True,
+        comment="True if compensating refund/reversal offset",
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        comment="ISO-4217 3-letter currency code",
+    )
+    rule_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Reconciliation rule triggering this match",
+    )
+    business_key: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+        comment="Deterministic SHA-256 hash uniquely keying active matches",
+    )
+    reconciliation_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        nullable=True,
+        index=True,
+        comment="UUID of the reconciliation execution run",
+    )
+    compared_values: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_VARIANT,
+        nullable=True,
+        comment="Snapshot of compared identifiers, amounts, and dates",
+    )
+    calculation: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_VARIANT,
+        nullable=True,
+        comment="Structured arithmetic breakdown of allocations, fees, and remainders",
+    )
+    severity: Mapped[DiscrepancySeverity] = mapped_column(
+        SQLEnum(DiscrepancySeverity, name="discrepancy_severity_enum"),
+        default=DiscrepancySeverity.INFO,
+        nullable=False,
+        comment="Audit finding severity",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Human justifications or audit notes",
+    )
+    is_demo: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        index=True,
+        comment="Demo synthetic data flag",
+    )
+
+    # Relationships
+    export_transaction: Mapped["ExportTransaction"] = relationship(
+        "ExportTransaction",
+        back_populates="matches",
+    )
+    invoice: Mapped["Invoice | None"] = relationship("Invoice")
+    payment: Mapped["Payment | None"] = relationship("Payment")
+    settlement: Mapped["Settlement | None"] = relationship("Settlement")
+    bank_transaction: Mapped["BankTransaction | None"] = relationship("BankTransaction")
+    shipping_bill: Mapped["ShippingBill | None"] = relationship("ShippingBill")
+    allocation: Mapped["Allocation | None"] = relationship("Allocation")
+    evidence_references: Mapped[list["EvidenceReference"]] = relationship(
+        "EvidenceReference",
+        back_populates="match",
+    )
+
+    __table_args__ = (
+        CheckConstraint("allocated_amount >= 0", name="ck_match_amount_non_negative"),
+        Index(
+            "ix_reconciliation_matches_active_bkey",
+            "export_transaction_id",
+            "business_key",
+            unique=True,
+            postgresql_where=(review_status != AllocationReviewStatus.SUPERSEDED),
+        ),
     )
 
 
@@ -165,6 +344,25 @@ class Discrepancy(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
         comment="Identifier of the reconciliation rule that triggered (e.g. RULE_AMOUNT_MISMATCH)",
     )
+    export_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("export_transactions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Export transaction deal context",
+    )
+    business_key: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="Deterministic SHA-256 hash uniquely keying active discrepancies",
+    )
+    reconciliation_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        nullable=True,
+        index=True,
+        comment="UUID of the reconciliation execution run",
+    )
     severity: Mapped[DiscrepancySeverity] = mapped_column(
         SQLEnum(DiscrepancySeverity, name="discrepancy_severity_enum"),
         default=DiscrepancySeverity.WARNING,
@@ -176,6 +374,11 @@ class Discrepancy(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         JSON_VARIANT,
         nullable=True,
         comment="Snapshot dictionary of conflicting field values (e.g. {'invoice_total': '100.00', 'payment_gross': '90.00'})",
+    )
+    calculation: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_VARIANT,
+        nullable=True,
+        comment="Itemized calculation showing evidenced deductions and unexplained remainder",
     )
     description: Mapped[str] = mapped_column(
         Text,
@@ -192,7 +395,7 @@ class Discrepancy(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=DiscrepancyStatus.OPEN,
         nullable=False,
         index=True,
-        comment="Resolution status: open, acknowledged, resolved, dismissed",
+        comment="Resolution status: open, acknowledged, resolved, dismissed, superseded",
     )
     is_demo: Mapped[bool] = mapped_column(
         default=False,
@@ -202,11 +405,27 @@ class Discrepancy(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     # Relationships
+    export_transaction: Mapped["ExportTransaction | None"] = relationship(
+        "ExportTransaction",
+        back_populates="discrepancies",
+    )
+
+    # Relationships
     evidence_references: Mapped[list["EvidenceReference"]] = relationship(
         "EvidenceReference",
         back_populates="discrepancy",
         foreign_keys="EvidenceReference.discrepancy_id",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_discrepancies_active_bkey",
+            "export_transaction_id",
+            "business_key",
+            unique=True,
+            postgresql_where=(status.in_([DiscrepancyStatus.OPEN, DiscrepancyStatus.ACKNOWLEDGED])),
+        ),
     )
 
 
@@ -267,14 +486,14 @@ class EvidenceReference(Base, UUIDPrimaryKeyMixin):
 
     discrepancy_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("discrepancies.id", ondelete="CASCADE"),
+        ForeignKey("discrepancies.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Optional parent Discrepancy supported by this evidence",
     )
     allocation_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("allocations.id", ondelete="CASCADE"),
+        ForeignKey("allocations.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Optional parent Allocation supported by this evidence",
@@ -286,16 +505,23 @@ class EvidenceReference(Base, UUIDPrimaryKeyMixin):
         index=True,
         comment="Optional parent TransactionLink supported by this evidence",
     )
+    match_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("reconciliation_matches.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Optional parent ReconciliationMatch supported by this evidence",
+    )
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("documents.id", ondelete="SET NULL"),
+        ForeignKey("documents.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Source physical document",
     )
     extracted_field_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("extracted_fields.id", ondelete="SET NULL"),
+        ForeignKey("extracted_fields.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Granular extracted field row",
@@ -360,6 +586,11 @@ class EvidenceReference(Base, UUIDPrimaryKeyMixin):
     allocation: Mapped["Allocation | None"] = relationship(
         "Allocation",
         back_populates="evidence_references",
+    )
+    match: Mapped["ReconciliationMatch | None"] = relationship(
+        "ReconciliationMatch",
+        back_populates="evidence_references",
+        foreign_keys=[match_id],
     )
     transaction_link: Mapped["TransactionLink | None"] = relationship(
         "TransactionLink",

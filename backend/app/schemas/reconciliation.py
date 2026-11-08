@@ -36,6 +36,7 @@ class AllocationBase(ProcureMindBaseSchema):
     settlement_id: uuid.UUID | None = None
     bank_transaction_id: uuid.UUID | None = None
     allocated_amount: MoneyAmount
+    is_reversal: bool = False
     currency: CurrencyCode
     allocation_method: AllocationMethod = AllocationMethod.AUTO_EXACT
     evidence_notes: str | None = None
@@ -96,8 +97,12 @@ class AllocationRead(AllocationBase):
 # --- Discrepancy ---
 class DiscrepancyBase(ProcureMindBaseSchema):
     rule_id: str = Field(..., max_length=100)
+    export_transaction_id: uuid.UUID | None = None
+    business_key: str | None = Field(None, max_length=64)
+    reconciliation_run_id: uuid.UUID | None = None
     severity: DiscrepancySeverity = DiscrepancySeverity.WARNING
     compared_fields: dict[str, Any] | None = None
+    calculation: dict[str, Any] | None = None
     description: str
     recommended_action: str | None = None
     status: DiscrepancyStatus = DiscrepancyStatus.OPEN

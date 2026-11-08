@@ -6,9 +6,9 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
-from app.core.currencies import validate_currency_code
+from app.core.currencies import validate_currency_code, validate_currency_scale
 from app.models.enums import TransactionStatus
 from app.schemas.common import (
     CurrencyCode,
@@ -65,6 +65,15 @@ class InvoiceLineItemBase(ProcureMindBaseSchema):
     def check_amount(cls, v: Decimal) -> Decimal:
         return validate_money_amount(v)
 
+    @model_validator(mode="after")
+    def validate_precision(self) -> "InvoiceLineItemBase":
+        if self.currency:
+            if self.unit_price is not None:
+                validate_currency_scale(self.unit_price, self.currency)
+            if self.total_amount is not None:
+                validate_currency_scale(self.total_amount, self.currency)
+        return self
+
 
 class InvoiceLineItemCreate(InvoiceLineItemBase):
     invoice_id: uuid.UUID | None = None
@@ -102,6 +111,12 @@ class InvoiceBase(ProcureMindBaseSchema):
         if val <= Decimal("0.00"):
             raise ValueError("Invoice total_amount must be greater than zero")
         return val
+
+    @model_validator(mode="after")
+    def validate_precision(self) -> "InvoiceBase":
+        if self.currency and self.total_amount is not None:
+            validate_currency_scale(self.total_amount, self.currency)
+        return self
 
 
 class InvoiceCreate(InvoiceBase):
@@ -145,6 +160,12 @@ class ShippingBillBase(ProcureMindBaseSchema):
         if val <= Decimal("0.00"):
             raise ValueError("Declared value must be greater than zero")
         return val
+
+    @model_validator(mode="after")
+    def validate_precision(self) -> "ShippingBillBase":
+        if self.declared_currency and self.declared_value is not None:
+            validate_currency_scale(self.declared_value, self.declared_currency)
+        return self
 
 
 class ShippingBillCreate(ShippingBillBase):

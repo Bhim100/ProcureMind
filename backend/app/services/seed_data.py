@@ -34,7 +34,13 @@ from app.models.enums import (
 )
 from app.models.export import ExportTransaction, Invoice, InvoiceLineItem, ShippingBill
 from app.models.payment import BankTransaction, Payment, ProviderWebhookEvent, Settlement
-from app.models.reconciliation import Allocation, Discrepancy, EvidenceReference, HumanDecision
+from app.models.reconciliation import (
+    Allocation,
+    Discrepancy,
+    EvidenceReference,
+    HumanDecision,
+    ReconciliationMatch,
+)
 from app.models.relationship import TransactionLink
 
 
@@ -45,8 +51,12 @@ def clear_demo_data(db: Session) -> None:
         (EvidenceReference.discrepancy.has(Discrepancy.is_demo == True))
         | (EvidenceReference.allocation.has(Allocation.is_demo == True))
         | (EvidenceReference.transaction_link.has(TransactionLink.is_demo == True))
+        | (EvidenceReference.match.has(ReconciliationMatch.is_demo == True))
     ).delete(synchronize_session=False)
 
+    db.query(ReconciliationMatch).filter(ReconciliationMatch.is_demo == True).delete(
+        synchronize_session=False
+    )
     db.query(TransactionLink).filter(TransactionLink.is_demo == True).delete(
         synchronize_session=False
     )
@@ -448,6 +458,8 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
 
     disc_4 = Discrepancy(
         rule_id="RULE_AMOUNT_MISMATCH",
+        export_transaction_id=exp_4.id,
+        business_key="bkey-demo-disc-4",
         severity=DiscrepancySeverity.ERROR,
         compared_fields={
             "invoice_number": "INV-2026-004",
@@ -533,6 +545,8 @@ def seed_demo_scenarios(db: Session) -> dict[str, Any]:
 
     disc_5 = Discrepancy(
         rule_id="RULE_AMBIGUOUS_CANDIDATE",
+        export_transaction_id=exp_5.id,
+        business_key="bkey-demo-disc-5",
         severity=DiscrepancySeverity.WARNING,
         compared_fields={
             "payment_id": str(pmt_5.id),

@@ -22,7 +22,7 @@ from app.models.enums import TransactionStatus
 
 if TYPE_CHECKING:
     from app.models.payment import BankTransaction, Payment, Settlement
-    from app.models.reconciliation import Allocation
+    from app.models.reconciliation import Allocation, Discrepancy, ReconciliationMatch
     from app.models.relationship import TransactionLink
 
 
@@ -103,6 +103,14 @@ class ExportTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "TransactionLink",
         back_populates="export_transaction",
     )
+    matches: Mapped[list["ReconciliationMatch"]] = relationship(
+        "ReconciliationMatch",
+        back_populates="export_transaction",
+    )
+    discrepancies: Mapped[list["Discrepancy"]] = relationship(
+        "Discrepancy",
+        back_populates="export_transaction",
+    )
 
 
 class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -156,7 +164,7 @@ class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Uppercase 3-letter ISO-4217 currency code (e.g. USD, EUR, INR)",
     )
     total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Gross invoice total payable in the specified currency",
     )
@@ -226,12 +234,12 @@ class InvoiceLineItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Quantity of units billed (supports fractional amounts)",
     )
     unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Unit price in the invoice currency",
     )
     total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Line item subtotal (quantity * unit_price)",
     )
@@ -307,7 +315,7 @@ class ShippingBill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="Currency of value declared to customs (ISO-4217)",
     )
     declared_value: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Total value of goods declared to customs authorities",
     )

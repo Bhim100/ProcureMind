@@ -12,10 +12,14 @@ Endpoints provide:
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.enums import AllocationReviewStatus, DiscrepancyStatus, MatchStatus
+from app.models.reconciliation import Discrepancy, ReconciliationMatch
+from app.schemas.match import ReconciliationMatchRead, ReconciliationRunResponse
+from app.schemas.reconciliation import DiscrepancyRead
 from app.schemas.relationship import (
     DiscoveryResponse,
     LinkDecisionRequest,
@@ -25,6 +29,7 @@ from app.schemas.relationship import (
     TransactionLinkRead,
 )
 from app.schemas.transaction import TransactionDetailRead
+from app.services.reconciliation_engine import reconcile_transaction
 from app.services.relationship_service import (
     apply_link_decision,
     assign_record_to_transaction,
@@ -145,3 +150,71 @@ def decide_link(
     """
     link = apply_link_decision(db=db, transaction_id=id, link_id=link_id, payload=payload)
     return TransactionLinkRead.model_validate(link)
+
+
+@router.post(
+    "/{id}/reconcile",
+    response_model=ReconciliationRunResponse,
+    summary="Execute deterministic matching and reconciliation engine for a transaction",
+)
+def run_reconciliation(
+    id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> ReconciliationRunResponse:
+    """
+    Executes the deterministic matching engine on the transaction.
+
+    Proposes matches (review_status='suggested') and flags discrepancies.
+    Does NOT write to allocations or autonomously mark transaction as reconciled.
+    """
+    return reconcile_transaction(db=db, transaction_id=id)
+
+
+@router.get(
+    "/{id}/matches",
+    response_model=list[ReconciliationMatchRead],
+    summary="Get proposed and confirmed reconciliation matches for a transaction",
+)
+def list_transaction_matches(
+    id: uuid.UUID,
+    match_status: MatchStatus | None = Query(None, description="Filter by match status"),
+    review_status: AllocationReviewStatus | None = Query(
+        None, description="Filter by review status"
+    ),
+    db: Session = Depends(get_db),
+) -> list[ReconciliationMatchRead]:
+    """Returns all active reconciliation matches for the transaction."""
+    query = db.query(ReconciliationMatch).filter(
+        ReconciliationMatch.export_transaction_id == id,
+        ReconciliationMatch.review_status != AllocationReviewStatus.SUPERSEDED,
+    )
+    if match_status:
+        query = query.filter(ReconciliationMatch.match_status == match_status)
+    if review_status:
+        query = query.filter(ReconciliationMatch.review_status == review_status)
+
+    matches = query.order_by(ReconciliationMatch.created_at.asc()).all()
+    return [ReconciliationMatchRead.model_validate(m) for m in matches]
+
+
+@router.get(
+    "/{id}/discrepancies",
+    response_model=list[DiscrepancyRead],
+    summary="Get all audit discrepancies and mismatches for a transaction",
+)
+def list_transaction_discrepancies(
+    id: uuid.UUID,
+    status: DiscrepancyStatus | None = Query(None, description="Filter by discrepancy status"),
+    db: Session = Depends(get_db),
+) -> list[DiscrepancyRead]:
+    """Returns all audit discrepancies associated with the transaction."""
+    query = db.query(Discrepancy).filter(Discrepancy.export_transaction_id == id)
+    if status:
+        query = query.filter(Discrepancy.status == status)
+    else:
+        query = query.filter(
+            Discrepancy.status.in_([DiscrepancyStatus.OPEN, DiscrepancyStatus.ACKNOWLEDGED])
+        )
+
+    discs = query.order_by(Discrepancy.created_at.asc()).all()
+    return [DiscrepancyRead.model_validate(d) for d in discs]

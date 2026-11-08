@@ -53,7 +53,7 @@ class BankTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="ISO-4217 3-letter currency code (e.g. USD, EUR, INR)",
     )
     amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Monetary value credited or debited on the bank statement",
     )
@@ -138,7 +138,7 @@ class Settlement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="ISO-4217 3-letter currency code",
     )
     amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Net payout amount transferred to merchant bank account",
     )
@@ -238,18 +238,18 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="ISO-4217 3-letter currency code",
     )
     gross_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Total gross amount paid by customer before fees",
     )
     fee_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
-        default=Decimal("0.00"),
+        default=Decimal("0.0000"),
         comment="Payment processing fee deducted by provider",
     )
     net_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Numeric(18, 4),
         nullable=False,
         comment="Net proceeds credited (gross_amount - fee_amount)",
     )

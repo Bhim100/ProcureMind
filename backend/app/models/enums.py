@@ -106,11 +106,22 @@ class AllocationMethod(str, Enum):
 
 
 class AllocationReviewStatus(str, Enum):
-    """Review approval state of an allocation."""
+    """Review approval state of an allocation or proposed match."""
 
     SUGGESTED = "suggested"
     APPROVED = "approved"
     REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class MatchStatus(str, Enum):
+    """Classification status of a proposed or verified trade/financial match."""
+
+    MATCHED = "matched"
+    PARTIAL = "partial"
+    AMBIGUOUS = "ambiguous"
+    UNMATCHED = "unmatched"
+    REQUIRES_HUMAN_REVIEW = "requires_human_review"
 
 
 class DiscrepancySeverity(str, Enum):
@@ -129,6 +140,7 @@ class DiscrepancyStatus(str, Enum):
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
+    SUPERSEDED = "superseded"
 
 
 class DecisionType(str, Enum):
@@ -147,6 +159,7 @@ class TargetType(str, Enum):
     ALLOCATION = "allocation"
     DOCUMENT = "document"
     TRANSACTION_LINK = "transaction_link"
+    RECONCILIATION_MATCH = "reconciliation_match"
     INVOICE = "invoice"
     SHIPPING_BILL = "shipping_bill"
     PAYMENT = "payment"

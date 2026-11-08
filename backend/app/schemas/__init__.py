@@ -28,6 +28,12 @@ from app.schemas.export import (
     ShippingBillCreate,
     ShippingBillRead,
 )
+from app.schemas.match import (
+    MatchDecisionRequest,
+    ReconciliationMatchRead,
+    ReconciliationRunResponse,
+    SettlementFlowStage,
+)
 from app.schemas.payment import (
     BankTransactionBase,
     BankTransactionCreate,
@@ -120,6 +126,7 @@ __all__ = [
     "InvoiceRead",
     "InvoiceWithLinkStatus",
     "LinkDecisionRequest",
+    "MatchDecisionRequest",
     "MoneyAmount",
     "PaymentBase",
     "PaymentCreate",
@@ -129,10 +136,13 @@ __all__ = [
     "ProviderWebhookEventBase",
     "ProviderWebhookEventCreate",
     "ProviderWebhookEventRead",
+    "ReconciliationMatchRead",
+    "ReconciliationRunResponse",
     "RecordAssignmentRequest",
     "RecordAssignmentResponse",
     "SettlementBase",
     "SettlementCreate",
+    "SettlementFlowStage",
     "SettlementRead",
     "SettlementWithLinkStatus",
     "ShippingBillBase",
