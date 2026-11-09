@@ -195,6 +195,10 @@ class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="invoice",
         cascade="all, delete-orphan",
     )
+    payments: Mapped[list["Payment"]] = relationship(
+        "Payment",
+        back_populates="invoice",
+    )
 
     __table_args__ = (Index("ix_invoices_seller_num", "seller_name", "invoice_number"),)
 

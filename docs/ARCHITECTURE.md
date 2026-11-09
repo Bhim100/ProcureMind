@@ -88,11 +88,13 @@ erDiagram
     ExportTransaction ||--o{ BankTransaction : "deposits"
     ExportTransaction ||--o{ TransactionLink : "scopes"
     Invoice ||--o{ InvoiceLineItem : "contains"
+    Invoice ||--o{ Payment : "receives"
     
     Settlement ||--o{ Payment : "batches"
     BankTransaction ||--o{ Settlement : "settles"
     
     Payment ||--o{ ProviderWebhookEvent : "triggers"
+    Payment ||--o| Payment : "refunds_parent"
     
     TransactionLink ||--o| Invoice : "invoice_id"
     TransactionLink ||--o| ShippingBill : "shipping_bill_id"
@@ -224,15 +226,19 @@ erDiagram
     Payment {
         uuid id PK
         uuid export_transaction_id FK
+        uuid invoice_id FK
         string provider
         uuid settlement_id FK
         string provider_order_id
         string provider_capture_id UK
+        string provider_refund_id UK
+        uuid parent_payment_id FK
         string invoice_reference
         string currency
         numeric gross_amount
         numeric fee_amount
         numeric net_amount
+        string description
         string status
         timestamptz event_time
         string environment
@@ -565,6 +571,211 @@ sequenceDiagram
         Auditor->>NextJS: Inspects side-by-side evidence
         Auditor->>Backend: POST /decisions (Human Approval / Override)
         Backend->>DB: Insert HumanDecision record
+    end
+```
+
+---
+
+## 8. PayPal Sandbox Checkout & Verified Ingestion Architecture (Phase 5)
+
+Phase 5 implements a functional, production-grade checkout and payment-event ingestion integration strictly bound to the **PayPal Sandbox environment**. In compliance with core architectural rules, money movement requires mandatory human auditor approval, payment orders are strictly bound to stored database invoices, and webhook events are deduplicated at the database tier.
+
+```mermaid
+flowchart TD
+    subgraph Client ["Frontend Client Tier (/payments)"]
+        UI_Gate["Auditor Unlock Card (X-Auditor-Key)"]
+        UI_Buttons["PayPal JS SDK Buttons (Dynamic Currency)"]
+        UI_Ledger["Audit & Payment Transparency Ledger"]
+    end
+
+    subgraph SecurityGate ["Auditor Authorization Gate (/invoices/{id}/approve)"]
+        KeyCheck{"X-Auditor-Key valid & len >= 16?"}
+        BalanceCheck{"remaining_balance > 0?"}
+        PersistDecision["Persist HumanDecision (action: approved, target: invoice)"]
+        UI_Gate --> KeyCheck
+        KeyCheck -->|No| Err401["401 Unauthorized"]
+        KeyCheck -->|Yes| BalanceCheck
+        BalanceCheck -->|Zero| Err400["400 Bad Request: Paid in Full"]
+        BalanceCheck -->|Positive| PersistDecision
+    end
+
+    subgraph OrderFlow ["Order Initiation (/payments/invoices/{id}/pay)"]
+        LockInvoice["SELECT ... FOR UPDATE (Invoice)"]
+        CheckApproval{"Invoice is approved?"}
+        CheckExisting{"Active Pending Order in DB?<br/>(uq_payments_pending_invoice_order)"}
+        ReuseOrder["Return Existing Pending Order (Idempotent)"]
+        CallPayPalOrder["Call PayPal Orders v2 API<br/>(PayPal-Request-Id: PM-ORDER-{id})"]
+        InsertPendingPayment["Insert Payment (status: 'pending', provider: 'paypal')"]
+        
+        PersistDecision -.-> LockInvoice
+        LockInvoice --> CheckApproval
+        CheckApproval -->|No| Err400_Unapproved["400 Bad Request: Unapproved"]
+        CheckApproval -->|Yes| CheckExisting
+        CheckExisting -->|Yes| ReuseOrder
+        CheckExisting -->|No| CallPayPalOrder
+        CallPayPalOrder --> InsertPendingPayment
+        InsertPendingPayment --> ReturnOrder["Return 200 OK (order_id, approve_url)"]
+        ReuseOrder --> ReturnOrder
+        ReturnOrder --> UI_Buttons
+    end
+
+    subgraph CaptureFlow ["Bound Order Capture (/payments/orders/{order_id}/capture)"]
+        BuyerApproval["Buyer Logs into Sandbox & Approves"]
+        UI_Buttons --> BuyerApproval
+        BuyerApproval --> CallCapture["POST /api/v1/payments/orders/{order_id}/capture"]
+        LockPayment["SELECT ... FOR UPDATE (Payment bound to Order ID)"]
+        RecheckApproval["Re-verify Invoice Approval & Remaining Balance"]
+        CallPayPalCapture["Call PayPal Capture API<br/>(PayPal-Request-Id: PM-CAPTURE-{id})"]
+        VerifyConsistency{"Status COMPLETED & Currency/Amount Match?"}
+        UpdatePayment["Update Payment (status: 'completed', capture_id, fee, net)"]
+        TriggerRecon["Trigger Phase 4 Reconciliation Engine"]
+
+        CallCapture --> LockPayment
+        LockPayment --> RecheckApproval
+        RecheckApproval --> CallPayPalCapture
+        CallPayPalCapture --> VerifyConsistency
+        VerifyConsistency -->|Mismatch| Err400_Mismatch["400 Bad Request: Financial Mismatch"]
+        VerifyConsistency -->|Match| UpdatePayment
+        UpdatePayment --> TriggerRecon
+        TriggerRecon --> ReturnCaptured["200 OK (Captured Payment)"]
+        ReturnCaptured --> UI_Ledger
+    end
+
+    subgraph WebhookFlow ["Verified Webhook Ingestion (/api/v1/webhooks/paypal)"]
+        WebhookArrival["PayPal Dispatches Webhook Event"]
+        VerifyCrypto{"Verify Signature via PayPal API<br/>(Headers, Cert URL, Webhook ID)"}
+        DedupeSavepoint{"Savepoint Insert provider_event_id<br/>(uq_provider_webhook_events_id)"}
+        CaptureEvent{"Event Type?"}
+        HandleCapture["Update Payment status to COMPLETED"]
+        HandleRefund["Insert Discrete Refund Payment<br/>(provider_refund_id, parent_payment_id)"]
+        TriggerReversalRecon["Trigger Reconciliation Engine (is_reversal=True)"]
+        CommitAck["Commit Transaction & Return 200 OK"]
+
+        WebhookArrival --> VerifyCrypto
+        VerifyCrypto -->|Invalid| Reject400["400 Bad Request: Invalid Signature"]
+        VerifyCrypto -->|Valid| DedupeSavepoint
+        DedupeSavepoint -->|Duplicate| Ack200Dupe["Rollback Savepoint & Return 200 OK"]
+        DedupeSavepoint -->|New Event| CaptureEvent
+        CaptureEvent -->|PAYMENT.CAPTURE.COMPLETED| HandleCapture
+        CaptureEvent -->|PAYMENT.CAPTURE.REFUNDED| HandleRefund
+        HandleCapture --> CommitAck
+        HandleRefund --> TriggerReversalRecon
+        TriggerReversalRecon --> CommitAck
+    end
+```
+
+### 8.1 Core Architectural & Security Rules
+
+1. **Strict Sandbox Containment**:
+   - `PAYPAL_BASE_URL` is validated using Python's `urlparse`. Scheme must be `https`, and hostname is strictly restricted to `api-m.sandbox.paypal.com` or `api.sandbox.paypal.com`. Subpaths, query strings, fragments, userinfo, and custom ports are rejected at startup.
+   - `PAYPAL_ENVIRONMENT` must strictly equal `"sandbox"`. Live production environments and URLs are rejected by Pydantic validation.
+   - Client secrets are never returned in HTTP responses or exposed to the frontend.
+
+2. **Auditor Authorization Gate**:
+   - `AUDITOR_API_KEY` is loaded from the environment and must be at least 16 characters long.
+   - `POST /api/v1/invoices/{invoice_id}/approve` checks the `X-Auditor-Key` header via constant-time comparison (`secrets.compare_digest`), inserting an immutable `HumanDecision` record.
+   - Invoices cannot be paid unless `is_approved == True` and `remaining_balance > 0`.
+
+3. **Pending Order Idempotency**:
+   - Database partial unique index `uq_payments_pending_invoice_order` on `payments(invoice_id)` where `status in ('pending', 'PENDING') AND provider = 'paypal'`.
+   - Repeated calls to `/pay` return the existing pending order without creating redundant PayPal orders.
+   - All outgoing PayPal order creation calls pass `PayPal-Request-Id: PM-ORDER-{invoice_id}`.
+
+4. **Bound Capture Verification**:
+   - Capture requests lock the associated `Payment` row using `SELECT ... FOR UPDATE`.
+   - Re-verifies that the payment is linked to an approved invoice and the captured gross amount and currency match the stored order before marking as `completed`.
+   - Captures are made idempotent using `PayPal-Request-Id: PM-CAPTURE-{order_id}`.
+
+5. **Discrete Refund Modeling**:
+   - Refunds from `PAYMENT.CAPTURE.REFUNDED` are stored as distinct `Payment` records populated with `provider_refund_id` and linked to the original capture via `parent_payment_id`.
+   - Captures are never overwritten. A compensating reversal is passed to the Phase 4 reconciliation engine, proposing a reversal allocation for human auditor review.
+
+6. **Database Webhook Deduplication & Atomic Commitment**:
+   - Webhook events are checked against the unique constraint `provider_event_id` using nested database savepoints (`db.begin_nested()`).
+   - Duplicate deliveries are acknowledged immediately with `200 OK` without side effects.
+   - Responses are returned only after the event record, payment update, and reconciliation trigger are successfully committed.
+
+---
+
+### 8.2 Sequence Flows
+
+#### Sequence 1: Auditor Approval & Sandbox Checkout Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Auditor as Human Auditor
+    actor Buyer as International Buyer
+    participant UI as Next.js Payments UI (/payments)
+    participant API as FastAPI Backend (/api/v1)
+    participant DB as PostgreSQL (Sole Authority)
+    participant PayPal as PayPal Sandbox API
+
+    Auditor->>UI: Inputs Auditor Key & clicks "Approve Invoice"
+    UI->>API: POST /api/v1/invoices/{id}/approve (X-Auditor-Key)
+    API->>API: Validate key length >= 16 & match AUDITOR_API_KEY
+    API->>DB: Verify Invoice & insert HumanDecision(action: approved)
+    DB-->>API: Persisted decision
+    API-->>UI: 200 OK (status: approved)
+    
+    Note over UI,PayPal: PayPal SDK Buttons unlock dynamically
+    Buyer->>UI: Clicks PayPal Checkout Button
+    UI->>API: POST /api/v1/payments/invoices/{id}/pay
+    API->>DB: Lock Invoice & check approval & active pending order
+    alt Existing Pending Order Exists
+        DB-->>API: Existing active Payment row
+        API-->>UI: 200 OK (existing order_id, approve_url)
+    else New Order Required
+        API->>PayPal: POST /v2/checkout/orders (PayPal-Request-Id)
+        PayPal-->>API: 201 Created (order_id, approve_url)
+        API->>DB: Insert Payment (status: pending, invoice_id)
+        API-->>UI: 200 OK (order_id, approve_url)
+    end
+
+    Buyer->>PayPal: Logs into Sandbox & Approves Transaction
+    PayPal-->>UI: onApprove callback (orderID)
+    UI->>API: POST /api/v1/payments/orders/{order_id}/capture
+    API->>DB: Lock Payment & re-check Invoice approval & balance
+    API->>PayPal: POST /v2/checkout/orders/{order_id}/capture (PayPal-Request-Id)
+    PayPal-->>API: 201 Created (capture_id, status: COMPLETED, gross, fee, net)
+    API->>API: Verify returned amount & currency match stored order
+    API->>DB: Update Payment (status: completed, capture_id, fee, net)
+    API->>API: Trigger Phase 4 Reconciliation Engine (auto-allocation)
+    DB-->>API: Committed transaction
+    API-->>UI: 200 OK (Captured Payment Details)
+    UI-->>Auditor: Displays payment in Audit Ledger with SANDBOX badge
+```
+
+#### Sequence 2: Webhook Ingestion & Refund Reversal Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant PayPal as PayPal Sandbox Webhook Dispatcher
+    participant API as FastAPI Backend (/api/v1/webhooks/paypal)
+    participant DB as PostgreSQL (Sole Authority)
+    participant Recon as Phase 4 Reconciliation Engine
+
+    PayPal->>API: POST /api/v1/webhooks/paypal (Headers + Event JSON)
+    API->>PayPal: POST /v1/notifications/verify-webhook-signature
+    PayPal-->>API: 200 OK (verification_status: SUCCESS)
+    
+    API->>DB: Begin Savepoint & insert ProviderWebhookEvent(provider_event_id)
+    alt Duplicate Event ID
+        DB-->>API: IntegrityError (duplicate provider_event_id)
+        API->>DB: Rollback Savepoint
+        API-->>PayPal: 200 OK (duplicate acknowledged idempotently)
+    else New Event ID
+        DB-->>API: Persisted ProviderWebhookEvent row
+        alt Event is PAYMENT.CAPTURE.COMPLETED
+            API->>DB: Update Payment status to completed
+        else Event is PAYMENT.CAPTURE.REFUNDED
+            API->>DB: Insert child Payment (status: refunded, provider_refund_id, parent_payment_id)
+            API->>Recon: Trigger reconciliation proposal (is_reversal=True)
+            Recon->>DB: Insert proposed compensating Allocation
+        end
+        API->>DB: Commit Outer Transaction
+        API-->>PayPal: 200 OK (event processed and committed)
     end
 ```
 

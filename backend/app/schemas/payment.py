@@ -126,11 +126,15 @@ class PaymentBase(ProcureMindBaseSchema):
     settlement_id: uuid.UUID | None = None
     provider_order_id: str | None = Field(None, max_length=100)
     provider_capture_id: str | None = Field(None, max_length=100)
+    provider_refund_id: str | None = Field(None, max_length=100)
+    parent_payment_id: uuid.UUID | None = None
+    invoice_id: uuid.UUID | None = None
     invoice_reference: str | None = Field(None, max_length=100)
     currency: CurrencyCode
     gross_amount: MoneyAmount
-    fee_amount: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
-    net_amount: MoneyAmount
+    fee_amount: Decimal | None = Field(default=None, ge=Decimal("0.00"))
+    net_amount: MoneyAmount | None = None
+    description: str = Field(default="PayPal Sandbox / simulated export payment", max_length=255)
     status: PaymentStatus = PaymentStatus.COMPLETED
     event_time: datetime | None = None
     environment: EnvironmentLabel = EnvironmentLabel.SANDBOX
@@ -142,20 +146,28 @@ class PaymentBase(ProcureMindBaseSchema):
     def check_currency(cls, v: str) -> str:
         return validate_currency_code(v)
 
-    @field_validator("gross_amount", "fee_amount", "net_amount")
+    @field_validator("gross_amount")
     @classmethod
-    def check_amounts(cls, v: Decimal) -> Decimal:
+    def check_gross_amount(cls, v: Decimal) -> Decimal:
         return validate_money_amount(v)
+
+    @field_validator("fee_amount", "net_amount")
+    @classmethod
+    def check_optional_amounts(cls, v: Decimal | None) -> Decimal | None:
+        if v is not None:
+            return validate_money_amount(v)
+        return None
 
     @model_validator(mode="after")
     def validate_net_calculation(self) -> "PaymentBase":
         if self.gross_amount <= Decimal("0.00"):
             raise ValueError("Payment gross_amount must be greater than zero")
-        calculated_net = self.gross_amount - self.fee_amount
-        if self.net_amount != calculated_net:
-            raise ValueError(
-                f"Net amount ({self.net_amount}) does not equal gross ({self.gross_amount}) minus fee ({self.fee_amount}) = {calculated_net}"
-            )
+        if self.fee_amount is not None and self.net_amount is not None:
+            calculated_net = self.gross_amount - self.fee_amount
+            if self.net_amount != calculated_net:
+                raise ValueError(
+                    f"Net amount ({self.net_amount}) does not equal gross ({self.gross_amount}) minus fee ({self.fee_amount}) = {calculated_net}"
+                )
         if self.currency:
             if self.gross_amount is not None:
                 validate_currency_scale(self.gross_amount, self.currency)

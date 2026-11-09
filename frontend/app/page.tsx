@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, CheckCircle2, AlertCircle, Database, Server, ShieldCheck, RefreshCw, FileText, ArrowRight } from "lucide-react";
+import { Activity, CheckCircle2, AlertCircle, Database, Server, ShieldCheck, RefreshCw, FileText, ArrowRight, CreditCard } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -90,6 +90,13 @@ export default function Home() {
           </div>
 
           <div className="flex items-center space-x-3">
+            <Link
+              href="/payments"
+              className="inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-all"
+            >
+              <CreditCard className="w-3.5 h-3.5 mr-1.5" />
+              PayPal Sandbox (Phase 5)
+            </Link>
             <Link
               href="/documents"
               className="inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all"

@@ -130,7 +130,7 @@ def _extract_provider_fee_components(
                 )
 
     # Fallback to payment.fee_amount if greater than 0 and recorded by provider capture
-    if not components and payment.fee_amount > Decimal("0.0000"):
+    if not components and payment.fee_amount is not None and payment.fee_amount > Decimal("0.0000"):
         components["provider_transaction_fee"] = payment.fee_amount
         evidence_details.append(
             {
@@ -574,65 +574,66 @@ def reconcile_transaction(db: Session, transaction_id: uuid.UUID) -> Reconciliat
             )
             continue
 
-        # Check provider gross-to-net deduction audit
-        gross_to_net_deduction = p.gross_amount - p.net_amount
-        fee_components, fee_evidence = _extract_provider_fee_components(p)
-        total_evidenced_fees = sum(fee_components.values(), Decimal("0.0000"))
-        unsupported_remainder = gross_to_net_deduction - total_evidenced_fees
+        # Check provider gross-to-net deduction audit only when net_amount is populated
+        if p.net_amount is not None:
+            gross_to_net_deduction = p.gross_amount - p.net_amount
+            fee_components, fee_evidence = _extract_provider_fee_components(p)
+            total_evidenced_fees = sum(fee_components.values(), Decimal("0.0000"))
+            unsupported_remainder = gross_to_net_deduction - total_evidenced_fees
 
-        if unsupported_remainder > Decimal("0.0000"):
-            flag_discrepancy(
-                rule_id="RULE_UNDOCUMENTED_DEDUCTION",
-                severity=DiscrepancySeverity.ERROR,
-                target_record_type="payment",
-                target_record_id=p.id,
-                target_field="net_amount",
-                description=(
-                    f"Payment capture {p.provider_capture_id or p.id} gross-to-net deduction of "
-                    f"{gross_to_net_deduction} {p.currency} has unsupported remainder of {unsupported_remainder} {p.currency}."
-                ),
-                compared_fields={
-                    "payment_id": str(p.id),
-                    "provider_capture_id": p.provider_capture_id,
-                    "gross_amount": str(p.gross_amount),
-                    "net_amount": str(p.net_amount),
-                },
-                calculation={
-                    "gross_amount": str(p.gross_amount),
-                    "net_amount": str(p.net_amount),
-                    "gross_to_net_deduction": str(gross_to_net_deduction),
-                    "evidenced_fee_components": {k: str(v) for k, v in fee_components.items()},
-                    "total_evidenced_fees": str(total_evidenced_fees),
-                    "unexplained_remainder": str(unsupported_remainder),
-                    "fee_evidence_sources": fee_evidence,
-                },
-                recommended_action="Audit provider fee schedule or request revised settlement statement.",
-            )
-        elif gross_to_net_deduction > Decimal("0.0000") and unsupported_remainder == Decimal(
-            "0.0000"
-        ):
-            # Record verified documented fee
-            propose_match(
-                match_type="documented_fee_verification",
-                match_status=MatchStatus.MATCHED,
-                rule_id="RULE_DOCUMENTED_FEE",
-                allocated_amount=total_evidenced_fees,
-                currency=p_curr,
-                is_reversal=False,
-                payment_id=p.id,
-                compared_values={
-                    "gross_amount": str(p.gross_amount),
-                    "net_amount": str(p.net_amount),
-                },
-                calculation={
-                    "gross_amount": str(p.gross_amount),
-                    "net_amount": str(p.net_amount),
-                    "evidenced_fee_components": {k: str(v) for k, v in fee_components.items()},
-                    "total_documented_fees": str(total_evidenced_fees),
-                },
-                severity=DiscrepancySeverity.INFO,
-                notes="Provider payment processing fee verified against evidence.",
-            )
+            if unsupported_remainder > Decimal("0.0000"):
+                flag_discrepancy(
+                    rule_id="RULE_UNDOCUMENTED_DEDUCTION",
+                    severity=DiscrepancySeverity.ERROR,
+                    target_record_type="payment",
+                    target_record_id=p.id,
+                    target_field="net_amount",
+                    description=(
+                        f"Payment capture {p.provider_capture_id or p.id} gross-to-net deduction of "
+                        f"{gross_to_net_deduction} {p.currency} has unsupported remainder of {unsupported_remainder} {p.currency}."
+                    ),
+                    compared_fields={
+                        "payment_id": str(p.id),
+                        "provider_capture_id": p.provider_capture_id,
+                        "gross_amount": str(p.gross_amount),
+                        "net_amount": str(p.net_amount),
+                    },
+                    calculation={
+                        "gross_amount": str(p.gross_amount),
+                        "net_amount": str(p.net_amount),
+                        "gross_to_net_deduction": str(gross_to_net_deduction),
+                        "evidenced_fee_components": {k: str(v) for k, v in fee_components.items()},
+                        "total_evidenced_fees": str(total_evidenced_fees),
+                        "unexplained_remainder": str(unsupported_remainder),
+                        "fee_evidence_sources": fee_evidence,
+                    },
+                    recommended_action="Audit provider fee schedule or request revised settlement statement.",
+                )
+            elif gross_to_net_deduction > Decimal("0.0000") and unsupported_remainder == Decimal(
+                "0.0000"
+            ):
+                # Record verified documented fee
+                propose_match(
+                    match_type="documented_fee_verification",
+                    match_status=MatchStatus.MATCHED,
+                    rule_id="RULE_DOCUMENTED_FEE",
+                    allocated_amount=total_evidenced_fees,
+                    currency=p_curr,
+                    is_reversal=False,
+                    payment_id=p.id,
+                    compared_values={
+                        "gross_amount": str(p.gross_amount),
+                        "net_amount": str(p.net_amount),
+                    },
+                    calculation={
+                        "gross_amount": str(p.gross_amount),
+                        "net_amount": str(p.net_amount),
+                        "evidenced_fee_components": {k: str(v) for k, v in fee_components.items()},
+                        "total_documented_fees": str(total_evidenced_fees),
+                    },
+                    severity=DiscrepancySeverity.INFO,
+                    notes="Provider payment processing fee verified against evidence.",
+                )
 
         # Match payment to invoice receivable
         avail_payment_gross = p.gross_amount - consumed_payment_gross.get(p.id, Decimal("0.0000"))
@@ -885,7 +886,10 @@ def reconcile_transaction(db: Session, transaction_id: uuid.UUID) -> Reconciliat
         settle_curr = validate_currency_code(settle.currency)
         batch_payments = [p for p in payments if p.settlement_id == settle.id]
         if batch_payments:
-            sum_net_captures = sum((p.net_amount for p in batch_payments), Decimal("0.0000"))
+            sum_net_captures = sum(
+                (p.net_amount for p in batch_payments if p.net_amount is not None),
+                Decimal("0.0000"),
+            )
             if sum_net_captures == settle.amount:
                 flow_stages.append(
                     SettlementFlowStage(

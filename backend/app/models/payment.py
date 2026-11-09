@@ -13,7 +13,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String, text
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,7 +27,7 @@ from app.models.enums import (
 )
 
 if TYPE_CHECKING:
-    from app.models.export import ExportTransaction
+    from app.models.export import ExportTransaction, Invoice
     from app.models.reconciliation import Allocation
 
 
@@ -226,6 +226,27 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         comment="Provider transaction capture ID; unique when populated",
     )
+    provider_refund_id: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+        index=True,
+        comment="Provider transaction refund ID; unique when populated",
+    )
+    parent_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Links a refund/reversal payment back to the original capture payment",
+    )
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("invoices.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="Direct foreign key to the invoice this payment or refund belongs to",
+    )
     invoice_reference: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
@@ -242,16 +263,21 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         comment="Total gross amount paid by customer before fees",
     )
-    fee_amount: Mapped[Decimal] = mapped_column(
+    fee_amount: Mapped[Decimal | None] = mapped_column(
         Numeric(18, 4),
-        nullable=False,
-        default=Decimal("0.0000"),
-        comment="Payment processing fee deducted by provider",
+        nullable=True,
+        comment="Payment processing fee deducted by provider; null if not yet settled",
     )
-    net_amount: Mapped[Decimal] = mapped_column(
+    net_amount: Mapped[Decimal | None] = mapped_column(
         Numeric(18, 4),
+        nullable=True,
+        comment="Net proceeds credited (gross_amount - fee_amount); null if not yet settled",
+    )
+    description: Mapped[str] = mapped_column(
+        String(255),
+        default="PayPal Sandbox / simulated export payment",
         nullable=False,
-        comment="Net proceeds credited (gross_amount - fee_amount)",
+        comment="Operational description and environment label",
     )
     status: Mapped[PaymentStatus] = mapped_column(
         SQLEnum(PaymentStatus, name="payment_status_enum"),
@@ -290,6 +316,20 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "ExportTransaction",
         foreign_keys=[export_transaction_id],
     )
+    invoice: Mapped["Invoice | None"] = relationship(
+        "Invoice",
+        foreign_keys=[invoice_id],
+    )
+    parent_payment: Mapped["Payment | None"] = relationship(
+        "Payment",
+        remote_side="Payment.id",
+        foreign_keys=[parent_payment_id],
+        back_populates="child_refunds",
+    )
+    child_refunds: Mapped[list["Payment"]] = relationship(
+        "Payment",
+        back_populates="parent_payment",
+    )
     settlement: Mapped["Settlement | None"] = relationship(
         "Settlement",
         back_populates="payments",
@@ -303,7 +343,16 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="payment",
     )
 
-    __table_args__ = (Index("ix_payments_provider_capture", "provider", "provider_capture_id"),)
+    __table_args__ = (
+        Index("ix_payments_provider_capture", "provider", "provider_capture_id"),
+        Index(
+            "uq_payments_pending_invoice_order",
+            "invoice_id",
+            unique=True,
+            postgresql_where=text("status in ('pending', 'PENDING') AND provider = 'paypal'"),
+            sqlite_where=text("status in ('pending', 'PENDING') AND provider = 'paypal'"),
+        ),
+    )
 
 
 class ProviderWebhookEvent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -337,7 +386,7 @@ class ProviderWebhookEvent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     payment_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("payments.id", ondelete="SET NULL"),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
         comment="Foreign key to the Payment record created or updated by this webhook",

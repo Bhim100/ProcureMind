@@ -8,21 +8,21 @@ ProcureMind is an autonomous financial reconciliation engine designed for invoic
 PAYPAL/
 ├── backend/                  # FastAPI Application (Python, SQLAlchemy 2.0, Alembic)
 │   ├── app/
-│   │   ├── api/              # API routes (health, documents, transactions)
+│   │   ├── api/              # API routes (health, documents, transactions, invoices, payments, webhooks)
 │   │   ├── core/             # Configuration, CORS, database engine, normalization
 │   │   ├── models/           # Domain models (export, payment, reconciliation, relationship)
 │   │   ├── schemas/          # Pydantic v2 schemas for all payloads & responses
-│   │   ├── services/         # Document service, relationship service, seed scenarios
+│   │   ├── services/         # Document service, relationship service, reconciliation, paypal_service, seed
 │   │   ├── storage/          # Document object storage abstraction & implementations
 │   │   └── main.py           # FastAPI ASGI entrypoint, middleware, and redirects
-│   ├── migrations/           # Alembic database migrations (0001_phase1, 0002_phase3)
-│   ├── tests/                # Automated pytest suite (45 tests across Phase 1, 2, 3)
+│   ├── migrations/           # Alembic database migrations (0001_phase1, 0002_phase3, 0003_phase4, 0004_phase5)
+│   ├── tests/                # Automated pytest suite (63 tests across Phase 1, 2, 3, 4, 5)
 │   ├── alembic.ini           # Alembic database migration config
 │   ├── pyproject.toml        # uv / Python project metadata & dependencies
 │   ├── .env.example          # Backend environment placeholders
 │   └── README.md             # Backend development guide
 ├── frontend/                 # Next.js App Router (TypeScript, Tailwind, TanStack Query)
-│   ├── app/                  # App Router pages (/, /documents), layout, Query providers
+│   ├── app/                  # App Router pages (/, /documents, /payments), layout, Query providers
 │   ├── lib/                  # API client & UI utilities
 │   ├── components.json       # shadcn/ui configuration
 │   ├── package.json          # Node dependencies (pnpm)
@@ -215,6 +215,12 @@ flowchart TD
 | `S3_SECRET_ACCESS_KEY` | Storage secret key | `""` |
 | `FALKORDB_ENABLED` | Toggle secondary graph integration | `false` |
 | `CHROMA_ENABLED` | Toggle secondary vector storage | `false` |
+| `PAYPAL_ENVIRONMENT` | Strictly constrained to sandbox (live is prohibited) | `sandbox` |
+| `PAYPAL_BASE_URL` | Exact PayPal Sandbox API URL (no subpaths/queries) | `https://api-m.sandbox.paypal.com` |
+| `PAYPAL_CLIENT_ID` | PayPal Sandbox REST App Client ID | `your-sandbox-client-id` |
+| `PAYPAL_CLIENT_SECRET` | PayPal Sandbox REST App Client Secret | `your-sandbox-client-secret` |
+| `PAYPAL_WEBHOOK_ID` | PayPal Sandbox Webhook ID for signature verification | `your-sandbox-webhook-id` |
+| `AUDITOR_API_KEY` | Secret key for human auditor approvals (>= 16 chars) | `replace-with-a-secure-auditor-secret` |
 
 ### Frontend (`frontend/.env.example`)
 
@@ -308,21 +314,27 @@ Frontend application will be available at: [http://localhost:3000](http://localh
   - Versioned Alembic migration `0002_phase3_transaction_links.py`.
   - FalkorDB deferred entirely; PostgreSQL is the sole relationship authority.
 
-- **Phase 4: Parsing & LLM Structured Extraction** *(Next Phase)*
-  - Document parsing (PyMuPDF for text, pdfplumber for tables, openpyxl for spreadsheets, OCR fallback).
-  - Validated LLM structured extraction into Pydantic schemas with arithmetic validation.
+- **Phase 4: Deterministic Reconciliation Engine & Discrepancy Governance** *(Completed)*
+  - Core deterministic matching engine (`POST /api/v1/reconciliation/run`) with Decimal arithmetic precision and ISO-4217 currency safety.
+  - Multi-way matching: exact invoice vs payment/bank credits, documented fees (gross vs net), partial payments, tolerance windows.
+  - Immutable discrepancy creation with plain-language explanations, severity tiers (`info`, `warning`, `error`), and `EvidenceReference` linking.
+  - Human review governance via `POST /api/v1/reconciliation/discrepancies/{id}/decision` recording immutable `HumanDecision` audit logs.
+  - Zero autonomous approvals: uncertain matches or variances require explicit human sign-off.
+  - Versioned Alembic migration `0003_phase4_reconciliation.py`.
 
-- **Phase 5: Bank Statement Extraction**
-  - Extraction pipeline for multi-format bank statements, Indian digit grouping, and running balance validation.
+- **Phase 5: PayPal Sandbox Checkout & Verified Payment-Event Ingestion** *(Completed)*
+  - Strict PayPal Sandbox URL validation (`urlparse`, scheme https, exact hostnames `api-m.sandbox.paypal.com` / `api.sandbox.paypal.com`, no live fallback).
+  - Human auditor approval gate (`POST /api/v1/invoices/{id}/approve` via `X-Auditor-Key`, min 16 chars) ensuring payments cannot be initiated without prior sign-off.
+  - Server-created Orders (`POST /api/v1/payments/invoices/{id}/pay`) reading currency and amount exclusively from PostgreSQL; partial unique index `uq_payments_pending_invoice_order` prevents duplicate pending checkouts.
+  - Bound order capture (`POST /api/v1/payments/orders/{order_id}/capture`) with row locking (`SELECT FOR UPDATE`), re-verifying approval, balance, and returned currency/gross amount before triggering reconciliation.
+  - Webhook ingestion (`POST /api/v1/webhooks/paypal`) with cryptographic PayPal signature verification, database-level deduplication on `provider_event_id` via nested savepoints, and commit-before-acknowledgment.
+  - Discrete refund modeling via `provider_refund_id` and self-referential `parent_payment_id`, triggering Phase 4 compensating reversal proposals without overwriting capture facts.
+  - Complete Next.js `/payments` UI with Auditor Gate, dynamic PayPal JS SDK buttons, and settlement audit ledger.
+  - Versioned Alembic migration `0004_phase5_paypal_checkout.py`.
 
-- **Phase 6: FalkorDB Secondary Graph Visualization & Chroma Embeddings**
-  - Non-blocking secondary graph indexing and vector similarity search.
-
-- **Phase 7: Reconciliation & Automated Matching Engine**
-  - Multi-way matching rules, discrepancy categorization, and governed candidate matching.
-
-- **Phase 8: PayPal Sandbox Payment Integration**
-  - Webhook verification, capture tracking, and human-authorized sandbox payouts.
+- **Phase 6: Shipment and Export Logistics Documents** *(Next Phase)*
+  - Ingestion, schema mapping, and validation for logistics documents (bills of lading, packing lists, export declaration shipping bills).
+  - Cross-check physical shipping weights, quantities, and values against commercial invoices.
 
 ---
 

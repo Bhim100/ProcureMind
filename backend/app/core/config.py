@@ -1,4 +1,6 @@
-from pydantic import field_validator
+from urllib.parse import urlparse
+
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,6 +51,78 @@ class Settings(BaseSettings):
     CHROMA_ENABLED: bool = False
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8000
+
+    # PayPal Sandbox Configuration (Strictly Sandbox - Live is prohibited)
+    PAYPAL_ENVIRONMENT: str = "sandbox"
+    PAYPAL_BASE_URL: str = "https://api-m.sandbox.paypal.com"
+    PAYPAL_CLIENT_ID: str = ""
+    PAYPAL_CLIENT_SECRET: str = ""
+    PAYPAL_WEBHOOK_ID: str = ""
+
+    # Auditor Secret for Invoice Approvals (No default; must be configured with >= 16 chars)
+    AUDITOR_API_KEY: str | None = None
+
+    @field_validator("PAYPAL_ENVIRONMENT")
+    @classmethod
+    def validate_paypal_environment(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if clean != "sandbox":
+            raise ValueError(
+                f"ProcureMind is strictly restricted to PayPal Sandbox. "
+                f"PAYPAL_ENVIRONMENT must be 'sandbox', received: '{v}'"
+            )
+        return clean
+
+    @field_validator("PAYPAL_BASE_URL")
+    @classmethod
+    def validate_paypal_sandbox_url(cls, v: str, info: ValidationInfo) -> str:
+        clean_url = v.strip()
+        parsed = urlparse(clean_url)
+
+        # Allow localhost / testserver strictly in test environments
+        env = info.data.get("ENVIRONMENT", "development")
+        if env == "test" and parsed.hostname in ("localhost", "127.0.0.1", "testserver"):
+            return clean_url
+
+        if parsed.scheme != "https":
+            raise ValueError(f"PayPal Sandbox URL scheme must be 'https', got '{parsed.scheme}'")
+
+        allowed_hostnames = {"api-m.sandbox.paypal.com", "api.sandbox.paypal.com"}
+        if parsed.hostname not in allowed_hostnames:
+            raise ValueError(
+                f"Invalid PayPal Sandbox URL: '{clean_url}'. Hostname '{parsed.hostname}' is unauthorized. "
+                f"Permitted hostnames: {allowed_hostnames}. Live endpoints and subdomains are strictly prohibited."
+            )
+
+        # Prohibit path segments, query parameters, fragments, userinfo, and custom ports
+        if parsed.path not in ("", "/"):
+            raise ValueError(f"PayPal Sandbox URL must not include subpaths: '{parsed.path}'")
+        if parsed.query:
+            raise ValueError("PayPal Sandbox URL must not include query strings")
+        if parsed.fragment:
+            raise ValueError("PayPal Sandbox URL must not include fragments")
+        if parsed.username or parsed.password:
+            raise ValueError("PayPal Sandbox URL must not include user credentials")
+        if parsed.port not in (None, 443):
+            raise ValueError(
+                f"PayPal Sandbox URL must use standard HTTPS port (got port {parsed.port})"
+            )
+
+        return f"https://{parsed.hostname}"
+
+    @field_validator("AUDITOR_API_KEY")
+    @classmethod
+    def validate_auditor_api_key(cls, v: str | None) -> str | None:
+        if v is not None:
+            clean = v.strip()
+            if len(clean) < 16:
+                raise ValueError(
+                    "AUDITOR_API_KEY must be at least 16 characters long for security."
+                )
+            if clean in ("pm-dev-auditor-key-secret", "secret", "password", "1234567890123456"):
+                raise ValueError("Insecure default or trivial AUDITOR_API_KEY is prohibited.")
+            return clean
+        return None
 
     model_config = SettingsConfigDict(
         env_file=".env",
