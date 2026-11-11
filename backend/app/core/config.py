@@ -69,6 +69,25 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str | None = None
     LLM_TIMEOUT_SECONDS: int = 15
 
+    # Phase 7: Document Text Extraction & OCR Fallback Configuration
+    OCR_TESSERACT_CMD: str | None = None
+    PARSER_MAX_PAGES: int = 50
+    PARSER_PDF_OCR_DPI: int = 150
+    PARSER_MAX_RENDER_PIXELS: int = 16_000_000
+    PARSER_MAX_IMAGE_PIXELS: int = 25_000_000
+    PARSER_MAX_IMAGE_DIMENSION: int = 5_000
+    PARSER_MAX_XLSX_ARCHIVE_BYTES: int = 31_457_280  # 30 MB
+    PARSER_MAX_XLSX_SHEETS: int = 10
+    PARSER_MAX_XLSX_ROWS: int = 5_000
+    PARSER_MAX_XLSX_COLS: int = 100
+    PARSER_MAX_XLSX_CELLS: int = 50_000
+    PARSER_MAX_CSV_FIELD_BYTES: int = 65_536  # 64 KB
+    PARSER_MAX_CSV_RECORD_BYTES: int = 262_144  # 256 KB
+    PARSER_MAX_CSV_ROWS: int = 5_000
+    PARSER_MAX_CSV_COLS: int = 100
+    PARSER_MAX_TEXT_BLOCKS: int = 5_000
+    PARSER_MAX_TOTAL_OUTPUT_BYTES: int = 10_485_760  # 10 MB
+
     @field_validator("PAYPAL_ENVIRONMENT")
     @classmethod
     def validate_paypal_environment(cls, v: str) -> str:

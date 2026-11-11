@@ -839,3 +839,74 @@ sequenceDiagram
     end
 ```
 
+---
+
+## 9. Deterministic Text Extraction & OCR Fallback Architecture (Phase 7)
+
+Phase 7 implements deterministic text, geometry, table, and spreadsheet extraction with selective OCR fallback. The pipeline guarantees provenance tracking without LLM hallucination, preserves terminal review states, and enforces strict operational bounds before parsing.
+
+```mermaid
+flowchart TD
+    Doc["Uploaded Document in Private Storage (PDF / XLSX / CSV / Image)"]
+    Doc --> CheckFormat{"Format Type"}
+
+    CheckFormat -->|PDF| PDFPipe["PyMuPDF Native Text & Geometry
+    + pdfplumber Tables"]
+    PDFPipe --> CheckUsable{"has_usable_text?
+    (chars >= 30 & alnum >= 10)"}
+    CheckUsable -->|Yes| NativeText["Source: 'text'
+    Confidence: None"]
+    CheckUsable -->|No| RenderRaster["Rasterize Page at 150 DPI
+    (Pixel budget <= 16M px)"]
+    RenderRaster --> OCRAdapt["Tesseract OCR Adapter
+    Source: 'ocr'
+    Confidence: [0.0, 1.0]"]
+
+    CheckFormat -->|XLSX| ZipPreCheck["ZIP Header Inspection
+    (Uncompressed size <= 30 MB)"]
+    ZipPreCheck --> OpenPyXL["openpyxl Parser
+    - Preserve formulas
+    - Bounded rows/cols/cells"]
+
+    CheckFormat -->|CSV| CSVStd["Standard library csv.reader
+    - Field size limit 64 KB
+    - Record size limit 256 KB"]
+
+    CheckFormat -->|Image| ImgCheck["Image Header Bounds
+    (dim <= 5000, pixels <= 25M)"]
+    ImgCheck --> OCRAdapt
+
+    NativeText --> Output["ParsedDocument Response"]
+    OCRAdapt --> Output
+    OpenPyXL --> Output
+    CSVStd --> Output
+
+    Output --> TerminalGate{"Is Document Terminal?
+    (approved / rejected)"}
+    TerminalGate -->|Yes| KeepTerminal["Preserve status
+    Update page_count only"]
+    TerminalGate -->|No| UpdateParsed["Set status = 'parsed'
+    Update page_count"]
+```
+
+### Key Technical Guarantees
+
+1. **Selective OCR Fallback**:
+   - Digital PDF pages with usable native text (`>= 30` non-whitespace characters and `>= 10` alphanumeric characters) use PyMuPDF directly without rasterization or OCR.
+   - Only scanned image files or PDF pages lacking usable embedded text are rasterized at 150 DPI and processed through the injectable Tesseract OCR adapter.
+   - For mixed documents, OCR is executed strictly on the pages that require it, yielding `parse_method = "mixed"`.
+
+2. **Provenance & Normalized Geometry**:
+   - Every text block captures 1-based `page_number`, 0-based `block_index`, source method (`text` or `ocr`), and normalized bounding box coordinates `[x0, y0, x1, y1]` scaled strictly between `0.0` and `1.0`.
+   - OCR confidence is normalized to `[0.0, 1.0]`. Tesseract `-1` layout/unknown markers are mapped to `None`. Native PDF text confidence is strictly `None`.
+
+3. **Multi-layer Defense Limits**:
+   - **XLSX Zip-Bomb Prevention**: Pre-decompression central directory inspection verifies total uncompressed member bytes before `openpyxl` loads the workbook into memory.
+   - **CSV Limits**: Bounded record size tracking across multiline quoted records (<= 256 KB) and per-field limit (<= 64 KB).
+   - **Image & Render Budgets**: Dimensions verified via PIL header before decoding pixels; PDF OCR rasterization checks expected pixel count before rendering.
+   - **Response Payload Budget**: Total output JSON serialized size must not exceed 10 MB.
+
+4. **Terminal Review State Protection (Rule 3)**:
+   - Invoices or documents previously transitioned to `approved` or `rejected` are permanently protected against regression: parsing success or failure will never mutate their status to `parsed` or `needs_review`.
+
+

@@ -1,0 +1,5 @@
+Invoice Number,Date,Buyer,Description,Amount,Currency
+INV-2026-001,2026-03-15,"Global Imports, Inc.","Standard Widgets
+High Grade, Batch 42",15000.00,USD
+INV-2026-002,2026-03-16,Acme Logistics,Consulting Services,4500.00,USD
+

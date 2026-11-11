@@ -20,8 +20,8 @@ canonical phase requested by the user.
 | 3 | PostgreSQL transaction relationships | Completed |
 | 4 | Deterministic reconciliation | Completed |
 | 5 | PayPal Sandbox checkout and verified events | Completed |
-| 6 | Grounded AI investigation and reconciliation explanations | Implemented; verify this phase |
-| 7 | Deterministic text extraction and OCR fallback | Upcoming |
+| 6 | Grounded AI investigation and reconciliation explanations | Completed |
+| 7 | Deterministic text extraction and OCR fallback | Implemented; verify this phase |
 | 8 | LLM structured extraction for invoices/forms | Upcoming |
 | 9 | Bank statement extraction | Upcoming |
 | 10 | Shipment and logistics document extraction | Upcoming |

@@ -41,6 +41,17 @@ from app.schemas.match import (
     ReconciliationRunResponse,
     SettlementFlowStage,
 )
+from app.schemas.parser import (
+    BoundingBox,
+    DocumentParseMethod,
+    ParsedDocument,
+    ParsedPage,
+    ParsedRow,
+    ParsedSheet,
+    ParsedTable,
+    ParsedTextBlock,
+    SourceMethod,
+)
 from app.schemas.payment import (
     BankTransactionBase,
     BankTransactionCreate,
@@ -100,6 +111,7 @@ __all__ = [
     "BankTransactionRead",
     # Relationship & Transaction
     "BankTransactionWithLinkStatus",
+    "BoundingBox",
     # Common
     "CurrencyCode",
     "DiscoveryResponse",
@@ -109,6 +121,7 @@ __all__ = [
     # Document
     "DocumentBase",
     "DocumentCreate",
+    "DocumentParseMethod",
     "DocumentRead",
     "DocumentUpdate",
     "DocumentUploadResponse",
@@ -140,6 +153,12 @@ __all__ = [
     "MatchDecisionRequest",
     "MonetaryAmount",
     "MoneyAmount",
+    "ParsedDocument",
+    "ParsedPage",
+    "ParsedRow",
+    "ParsedSheet",
+    "ParsedTable",
+    "ParsedTextBlock",
     "PaymentBase",
     "PaymentCreate",
     "PaymentRead",
@@ -161,6 +180,7 @@ __all__ = [
     "ShippingBillCreate",
     "ShippingBillRead",
     "ShippingBillWithLinkStatus",
+    "SourceMethod",
     "TransactionDetailRead",
     "TransactionLinkBase",
     "TransactionLinkCreate",

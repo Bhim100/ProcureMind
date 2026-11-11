@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.models.document import Document
 from app.models.enums import ProcessingStatus
 from app.schemas.document import DocumentRead, DocumentUploadResponse, DownloadUrlResponse
+from app.schemas.parser import ParsedDocument
 from app.services.document_service import (
     compute_sha256,
     create_download_token,
@@ -27,6 +28,7 @@ from app.services.document_service import (
     validate_uploaded_document,
     verify_download_token,
 )
+from app.services.parser_service import parse_document
 from app.storage.interface import get_storage_service
 
 router = APIRouter()
@@ -218,3 +220,21 @@ def download_document(
             "Cache-Control": "private, no-cache, no-store, must-revalidate",
         },
     )
+
+
+@router.post(
+    "/{document_id}/parse",
+    response_model=ParsedDocument,
+    summary="Deterministically parse document text and tables with selective OCR fallback",
+)
+def parse_document_endpoint(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> ParsedDocument:
+    """Deterministically parses text and tables from an uploaded document in private storage.
+
+    Selectively invokes OCR only for image documents or PDF pages without usable embedded text.
+    Updates processing_status to 'parsed' and sets page_count upon success.
+    Protects terminal states ('approved', 'rejected') from modification.
+    """
+    return parse_document(db=db, document_id=str(document_id))
