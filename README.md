@@ -16,7 +16,7 @@ PAYPAL/
 │   │   ├── storage/          # Document object storage abstraction & implementations
 │   │   └── main.py           # FastAPI ASGI entrypoint, middleware, and redirects
 │   ├── migrations/           # Alembic database migrations (0001_phase1, 0002_phase3, 0003_phase4, 0004_phase5)
-│   ├── tests/                # Automated pytest suite (63 tests across Phase 1, 2, 3, 4, 5)
+│   ├── tests/                # Automated pytest suite (69 tests across Phases 1–6)
 │   ├── alembic.ini           # Alembic database migration config
 │   ├── pyproject.toml        # uv / Python project metadata & dependencies
 │   ├── .env.example          # Backend environment placeholders
@@ -332,9 +332,18 @@ Frontend application will be available at: [http://localhost:3000](http://localh
   - Complete Next.js `/payments` UI with Auditor Gate, dynamic PayPal JS SDK buttons, and settlement audit ledger.
   - Versioned Alembic migration `0004_phase5_paypal_checkout.py`.
 
-- **Phase 6: Shipment and Export Logistics Documents** *(Next Phase)*
-  - Ingestion, schema mapping, and validation for logistics documents (bills of lading, packing lists, export declaration shipping bills).
-  - Cross-check physical shipping weights, quantities, and values against commercial invoices.
+- **Phase 6: Grounded AI Investigation & Reconciliation Explanations** *(Implemented)*
+  - Read-only investigation endpoint and payments-page panel grounded in records for one transaction.
+  - Separates persisted financial facts from AI explanations, validates citations, and always requires human review.
+  - Refuses unauthorized financial actions and provides a safe unavailable state when the provider is not configured.
+
+- **Phase 7: Deterministic Text Parsing & OCR Fallback** *(Next Phase)*
+  - Parse PDF text and tables, XLSX, CSV, and images while preserving page, sheet, row, and bounding-box provenance.
+  - Use OCR only for images and pages without usable embedded text. No LLM extraction in this phase.
+
+- **Upcoming Phases 8–14**
+  - Phase 8: LLM structured extraction; Phase 9: bank statement extraction; Phase 10: shipment and logistics documents.
+  - Phase 11: review dashboard; Phase 12: optional FalkorDB/Chroma; Phase 13: evaluation harness; Phase 14: hardening and deployment.
 
 ---
 

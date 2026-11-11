@@ -615,14 +615,16 @@ sequenceDiagram
     Backend->>DB: Insert Document with status uploaded
     Backend-->>NextJS: 201 Created with Document ID
 
-    Note over Backend,DB: Phase 3 & 4: Parsing & LLM Extraction (Upcoming)
-    Backend->>Backend: Deterministic text parsing / OCR / LLM validation
-    Backend->>DB: Insert ExtractedFields & Domain Records (Invoice, Items)
+    Note over Backend,DB: Phase 7: Deterministic parsing and OCR fallback
+    Backend->>Backend: Parse document text and tables; OCR only pages without usable text
+    Note over Backend,DB: Phase 8: Validated structured extraction (upcoming)
+    Backend->>DB: Persist reviewed extracted fields and domain records
 
-    Note over Backend,DB: Phase 7: Deterministic Reconciliation
+    Note over Backend,DB: Phase 4: Deterministic Reconciliation (implemented)
     Backend->>DB: Match Invoice against ShippingBill & PayPal Payment
     alt Perfect 3-Way Match
-        Backend->>DB: Create Allocation with approved review_status
+        Backend->>DB: Create suggested match; do not approve allocation automatically
+        Auditor->>Backend: Review and approve through the human decision endpoint
     else Discrepancy Found (Amount or Fee variance)
         Backend->>DB: Create Discrepancy with severity error & EvidenceReferences
         Backend->>NextJS: Flag in Review Workspace
