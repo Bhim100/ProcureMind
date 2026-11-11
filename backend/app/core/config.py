@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     # Auditor Secret for Invoice Approvals (No default; must be configured with >= 16 chars)
     AUDITOR_API_KEY: str | None = None
 
+    # Phase 6: AI Explanation Service Configuration
+    LLM_PROVIDER: str = "gemini"
+    LLM_API_KEY: str | None = None
+    LLM_MODEL: str = "gemini-3.8-flash"
+    LLM_BASE_URL: str | None = None
+    LLM_TIMEOUT_SECONDS: int = 15
+
     @field_validator("PAYPAL_ENVIRONMENT")
     @classmethod
     def validate_paypal_environment(cls, v: str) -> str:

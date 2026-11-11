@@ -4,6 +4,11 @@ ProcureMind is an autonomous financial reconciliation engine designed for intern
 
 This document serves as the persistent technical architecture reference for all data models, security boundaries, and operational pipelines.
 
+> Canonical roadmap note: the original architecture draft used a different phase order. Under the
+> current roadmap, PostgreSQL relationships are Phase 3, deterministic reconciliation is Phase 4,
+> PayPal Sandbox is Phase 5, and grounded AI investigation is Phase 6. See `docs/PHASES.md` for the
+> authoritative phase list.
+
 ---
 
 ## 1. High-Level System Architecture
@@ -67,6 +72,59 @@ flowchart TD
     Router -.-> Chroma
     ReconciliationEngine -.-> PayPalSandbox
 ```
+
+## Grounded AI Investigation & Reconciliation Explanations (Canonical Phase 6)
+
+The feature exposes `POST /api/v1/transactions/{id}/investigate`. The path resolver accepts either
+the transaction UUID or its case-insensitive human-readable reference, then the service canonicalizes
+to the PostgreSQL UUID before querying child records. An optional discrepancy ID must belong to the
+same transaction or the request fails with HTTP 400.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Reviewer as Human Reviewer
+    participant UI as Payments / Investigation Panel
+    participant API as FastAPI Investigation Route
+    participant Service as Read-only Investigation Service
+    participant DB as PostgreSQL (Source of Truth)
+    participant LLM as Configured LLM Provider
+
+    Reviewer->>UI: Ask about EXP-DEMO-004
+    UI->>API: POST /transactions/{reference}/investigate
+    API->>Service: Resolve reference; validate request
+    Service->>DB: SELECT transaction-scoped invoices, payments, matches, discrepancies, evidence
+    DB-->>Service: Persisted records only
+    Service->>Service: Build exact financial facts + valid citation ID set
+    Service->>LLM: Send minimized JSON context and question
+    LLM-->>Service: Structured candidate explanation
+    Service->>Service: Pydantic validation; filter unrecognized citation UUIDs
+    Service-->>API: Facts + explanation + warnings; requires_human_review=true
+    API-->>UI: Read-only investigation result
+    UI-->>Reviewer: Show sources, financial facts, missing information, and optional draft
+```
+
+### Phase 6 boundaries
+
+- PostgreSQL remains the only authority for amounts, currencies, transaction state, and reconciliation
+  verdicts. The model supplies explanatory text only; financial facts are assembled from persisted
+  records and existing Phase 4 results.
+- All database reads are filtered by the canonical transaction ID. Model citation IDs are retained
+  only when they are UUIDs in that request's context. Free text from persisted records is untrusted
+  data, never instructions.
+- Monetary facts preserve the currency attached to the source invoice, payment, fee, net proceeds, or
+  discrepancy calculation. Cross-currency values are not subtracted. The response identifies the
+  mismatch for reviewer attention.
+- The service performs no database writes and cannot approve/reject matches, mutate balances, create
+  allocations, initiate PayPal actions, or send clarification drafts. Every response requires a
+  human reviewer. Requests for unauthorized actions are refused.
+- Provider configuration comes from backend environment variables. Gemini uses the REST API through
+  `httpx`; the API key is sent in a header. Missing keys, timeouts, HTTP failures, or invalid output
+  return a safe unavailable response. Logs contain transaction IDs and error classes, never provider
+  response bodies, prompts, keys, or full document text.
+- Automated tests inject deterministic mocked providers. They verify isolation, ownership checks,
+  refusal handling, citation filtering, currency labeling, failure fallback, and unchanged persisted
+  rows. No live LLM or PayPal call is part of automated verification.
 
 ---
 

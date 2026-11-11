@@ -22,6 +22,8 @@ import {
   approveInvoice,
   initiatePayment,
   captureOrder,
+  investigateTransaction,
+  InvestigationResponse,
   PaymentRead,
   InvoiceDetailResponse,
 } from "@/lib/api";
@@ -47,6 +49,13 @@ export default function PaymentsPage() {
 
   const paypalContainerRef = useRef<HTMLDivElement>(null);
   const [isScriptLoaded, setIsScriptLoaded] = useState<boolean>(false);
+  const [investigationReference, setInvestigationReference] = useState("EXP-DEMO-004");
+  const [investigationQuestion, setInvestigationQuestion] = useState(
+    "Explain the payment discrepancy and what evidence is still missing."
+  );
+  const [investigationResult, setInvestigationResult] = useState<InvestigationResponse | null>(null);
+  const [investigationError, setInvestigationError] = useState<string | null>(null);
+  const [isInvestigating, setIsInvestigating] = useState(false);
 
   // Fetch PayPal public config
   const { data: paypalConfig } = useQuery({
@@ -114,6 +123,22 @@ export default function PaymentsPage() {
   });
 
   const isApproved = invoiceDetail?.is_approved ?? false;
+  const activeInvoiceId = activeInvoice?.id;
+
+  const runInvestigation = async () => {
+    setIsInvestigating(true);
+    setInvestigationError(null);
+    setInvestigationResult(null);
+    try {
+      setInvestigationResult(
+        await investigateTransaction(investigationReference.trim(), investigationQuestion.trim())
+      );
+    } catch (err: unknown) {
+      setInvestigationError(err instanceof Error ? err.message : "Investigation request failed.");
+    } finally {
+      setIsInvestigating(false);
+    }
+  };
 
   // Handle Auditor Approval Action
   const handleApprove = async () => {
@@ -160,7 +185,7 @@ export default function PaymentsPage() {
 
   // Render PayPal Buttons inside container when approved and script loaded
   useEffect(() => {
-    if (!isScriptLoaded || !window.paypal || !paypalContainerRef.current || !isApproved || !activeInvoice) {
+    if (!isScriptLoaded || !window.paypal || !paypalContainerRef.current || !isApproved || !activeInvoiceId) {
       return;
     }
 
@@ -177,7 +202,7 @@ export default function PaymentsPage() {
           },
           createOrder: async () => {
             setCheckoutNotice(null);
-            const res = await initiatePayment(activeInvoice.id);
+            const res = await initiatePayment(activeInvoiceId);
             return res.order_id;
           },
           onApprove: async (data: any) => {
@@ -213,7 +238,7 @@ export default function PaymentsPage() {
     } catch (e) {
       console.error("Failed to render PayPal Buttons:", e);
     }
-  }, [isScriptLoaded, isApproved, activeInvoice?.id]);
+  }, [isScriptLoaded, isApproved, activeInvoiceId, refetchInvoiceDetail, refetchPayments]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
@@ -462,6 +487,60 @@ export default function PaymentsPage() {
             </div>
           </div>
         </div>
+
+        {/* Grounded AI Investigation */}
+        <section className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5" aria-labelledby="investigation-title">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div>
+              <h2 id="investigation-title" className="text-base font-semibold">AI Transaction Investigation</h2>
+              <p className="text-xs text-slate-500 mt-1">Explanations use persisted transaction and reconciliation records. Every result still requires human review.</p>
+            </div>
+            <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-violet-50 text-violet-800 border border-violet-200">Grounded · Read only</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label className="text-xs font-medium text-slate-600">
+              Transaction reference or UUID
+              <input value={investigationReference} onChange={(e) => setInvestigationReference(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+            <label className="text-xs font-medium text-slate-600 md:col-span-2">
+              Question
+              <textarea value={investigationQuestion} onChange={(e) => setInvestigationQuestion(e.target.value)} rows={2} maxLength={1000} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {["Summarize this transaction and its reconciliation status.", "Explain the payment discrepancy and what evidence is still missing.", "Explain the payment fees and net proceeds recorded."].map((prompt) => (
+              <button key={prompt} type="button" onClick={() => setInvestigationQuestion(prompt)} className="rounded-full border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">{prompt}</button>
+            ))}
+            <button type="button" onClick={runInvestigation} disabled={isInvestigating || !investigationReference.trim() || investigationQuestion.trim().length < 3} className="ml-auto rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white disabled:bg-slate-300">
+              {isInvestigating ? "Investigating…" : "Investigate"}
+            </button>
+          </div>
+          {investigationError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{investigationError}</p>}
+          {investigationResult && <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <strong className="text-sm">{investigationResult.transaction_reference}</strong>
+              <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${investigationResult.status === "success" ? "bg-emerald-100 text-emerald-800" : investigationResult.status === "refusal" ? "bg-amber-100 text-amber-900" : "bg-rose-100 text-rose-800"}`}>{investigationResult.status}</span>
+              <span className="text-xs text-slate-500">Provider: {investigationResult.provider}</span>
+              <span className="text-xs font-semibold text-amber-800">Human review required</span>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{investigationResult.explanation}</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {([
+                ["Invoice", investigationResult.authoritative_facts.invoice_total],
+                ["Payment gross", investigationResult.authoritative_facts.payment_gross],
+                ["Fee", investigationResult.authoritative_facts.fee_amount],
+                ["Net", investigationResult.authoritative_facts.net_amount],
+                ["Difference", investigationResult.authoritative_facts.unexplained_difference],
+              ] as const).map(([label, amount]) => <div key={label} className="rounded border border-slate-200 bg-white p-2"><div className="text-[10px] uppercase text-slate-500">{label}</div><div className="mt-1 text-xs font-semibold">{amount ? `${amount.currency} ${amount.amount}` : "Not recorded"}</div></div>)}
+            </div>
+            {!investigationResult.authoritative_facts.currencies_match && <p className="text-xs font-medium text-amber-800">{investigationResult.authoritative_facts.currency_mismatch_warning}</p>}
+            {investigationResult.missing_information.length > 0 && <div className="text-xs"><strong>Missing information</strong><ul className="list-disc pl-5">{investigationResult.missing_information.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div>}
+            {investigationResult.suggested_next_action && <p className="text-xs"><strong>Suggested human action:</strong> {investigationResult.suggested_next_action}</p>}
+            {investigationResult.draft_clarification_message && <label className="block text-xs font-medium">Draft clarification (copy and review before sending)<textarea readOnly value={investigationResult.draft_clarification_message} rows={4} className="mt-1 w-full rounded border border-slate-300 bg-white p-2 font-normal" /></label>}
+            {investigationResult.warnings.length > 0 && <ul className="list-disc pl-5 text-xs text-amber-800">{investigationResult.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul>}
+            <p className="text-[11px] text-slate-500">Cited persisted records: {investigationResult.cited_record_ids.length ? investigationResult.cited_record_ids.join(", ") : "None returned"}</p>
+          </div>}
+        </section>
 
         {/* Payment Ingestion & Audit Table */}
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">

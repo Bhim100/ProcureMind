@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.normalization import normalize_reference_identifier
@@ -74,10 +75,56 @@ def _to_entity_dict(entity: Any, link_status: str) -> dict[str, Any]:
     return data
 
 
+def get_transaction_by_id_or_reference(
+    db: Session, identifier: str | uuid.UUID
+) -> ExportTransaction:
+    """
+    Resolves an ExportTransaction by UUID or human-readable reference (case-insensitive).
+    Raises HTTP 404 if not found.
+    """
+    if isinstance(identifier, uuid.UUID):
+        tx = db.query(ExportTransaction).filter(ExportTransaction.id == identifier).first()
+        if tx:
+            return tx
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Export transaction '{identifier}' not found",
+        )
+
+    clean_id = str(identifier).strip()
+    clean_ref = clean_id
+
+    # 1. Attempt UUID parsing
+    try:
+        val_uuid = uuid.UUID(clean_id)
+        tx = db.query(ExportTransaction).filter(ExportTransaction.id == val_uuid).first()
+        if tx:
+            return tx
+    except ValueError:
+        pass
+
+    # 2. Attempt case-insensitive transaction_reference match
+    tx = (
+        db.query(ExportTransaction)
+        .filter(func.lower(ExportTransaction.transaction_reference) == clean_ref.lower())
+        .first()
+    )
+    if tx:
+        return tx
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Export transaction '{identifier}' not found by UUID or reference",
+    )
+
+
 def get_transaction_with_linked_entities(
-    db: Session, transaction_id: uuid.UUID
+    db: Session, transaction_id: str | uuid.UUID
 ) -> TransactionDetailRead:
     """Retrieves an ExportTransaction with all associated records and their link statuses."""
+    resolved_tx = get_transaction_by_id_or_reference(db, transaction_id)
+    canonical_id = resolved_tx.id
+
     tx = (
         db.query(ExportTransaction)
         .options(
@@ -88,7 +135,7 @@ def get_transaction_with_linked_entities(
             selectinload(ExportTransaction.bank_transactions),
             selectinload(ExportTransaction.links).selectinload(TransactionLink.evidence_references),
         )
-        .filter(ExportTransaction.id == transaction_id)
+        .filter(ExportTransaction.id == canonical_id)
         .first()
     )
     if not tx:

@@ -128,6 +128,52 @@ export interface OrderInitiationResponse {
   approval_url?: string | null;
 }
 
+export interface InvestigationResponse {
+  transaction_id: string;
+  transaction_reference: string;
+  discrepancy_id: string | null;
+  status: "success" | "unavailable" | "refusal";
+  explanation: string;
+  authoritative_facts: {
+    invoice_total: { amount: string; currency: string } | null;
+    payment_gross: { amount: string; currency: string } | null;
+    fee_amount: { amount: string; currency: string } | null;
+    net_amount: { amount: string; currency: string } | null;
+    unexplained_difference: { amount: string; currency: string } | null;
+    currencies_match: boolean;
+    currency_mismatch_warning: string | null;
+    calculation_breakdown: Record<string, unknown> | null;
+    is_reconciled: boolean;
+    open_discrepancy_count: number;
+  };
+  cited_record_ids: string[];
+  missing_information: string[];
+  suggested_next_action: string | null;
+  draft_clarification_message: string | null;
+  requires_human_review: boolean;
+  provider: string;
+  warnings: string[];
+}
+
+export async function investigateTransaction(
+  transactionIdOrReference: string,
+  question: string
+): Promise<InvestigationResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/transactions/${encodeURIComponent(transactionIdOrReference)}/investigate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }
+  );
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Investigation failed with status HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function getPayPalConfig(): Promise<PayPalConfigResponse> {
   const res = await fetch(`${API_BASE}/api/v1/payments/config`);
   if (!res.ok) {

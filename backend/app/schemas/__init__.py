@@ -28,6 +28,13 @@ from app.schemas.export import (
     ShippingBillCreate,
     ShippingBillRead,
 )
+from app.schemas.investigation import (
+    AuthoritativeFinancialFacts,
+    InvestigationRequest,
+    InvestigationResponse,
+    LLMInvestigationOutput,
+    MonetaryAmount,
+)
 from app.schemas.match import (
     MatchDecisionRequest,
     ReconciliationMatchRead,
@@ -86,6 +93,7 @@ __all__ = [
     "AllocationBase",
     "AllocationCreate",
     "AllocationRead",
+    "AuthoritativeFinancialFacts",
     # Payment
     "BankTransactionBase",
     "BankTransactionCreate",
@@ -118,6 +126,8 @@ __all__ = [
     "HumanDecisionBase",
     "HumanDecisionCreate",
     "HumanDecisionRead",
+    "InvestigationRequest",
+    "InvestigationResponse",
     "InvoiceBase",
     "InvoiceCreate",
     "InvoiceLineItemBase",
@@ -125,8 +135,10 @@ __all__ = [
     "InvoiceLineItemRead",
     "InvoiceRead",
     "InvoiceWithLinkStatus",
+    "LLMInvestigationOutput",
     "LinkDecisionRequest",
     "MatchDecisionRequest",
+    "MonetaryAmount",
     "MoneyAmount",
     "PaymentBase",
     "PaymentCreate",
