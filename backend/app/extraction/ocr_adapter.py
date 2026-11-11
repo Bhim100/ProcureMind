@@ -105,4 +105,3 @@ def perform_ocr(
         block_idx += 1
 
     return blocks
-

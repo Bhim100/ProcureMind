@@ -159,6 +159,33 @@ def test_parse_csv_deterministic() -> None:
     assert any("Batch 42" in (cell or "") for cell in row2.cells)
 
 
+def test_parse_csv_skips_blank_and_trailing_newlines() -> None:
+    # CSV containing embedded blank lines, whitespace-only rows, and multiple trailing newlines
+    raw_csv = (
+        b"header1,header2\n"
+        b"\n"  # blank line
+        b"   \n"  # whitespace-only line
+        b"val1,val2\n"
+        b" , \n"  # comma with only whitespace
+        b"val3,val4\n"
+        b"\n\n\n"  # trailing newlines
+    )
+    parsed = parse_csv(
+        file_bytes=raw_csv,
+        document_id=str(uuid.uuid4()),
+        filename="blank_lines.csv",
+    )
+    assert parsed.page_count == 1
+    assert len(parsed.sheets) == 1
+    sheet = parsed.sheets[0]
+    # Should only contain 3 valid data rows (header, val1/val2, val3/val4)
+    assert sheet.row_count == 3
+    assert [r.row_index for r in sheet.rows] == [1, 2, 3]
+    assert sheet.rows[0].cells == ["header1", "header2"]
+    assert sheet.rows[1].cells == ["val1", "val2"]
+    assert sheet.rows[2].cells == ["val3", "val4"]
+
+
 def test_parse_csv_record_limit_exceeded() -> None:
     # Generate CSV record that exceeds PARSER_MAX_CSV_RECORD_BYTES or field limits
     oversized_text = "A" * (settings.PARSER_MAX_CSV_RECORD_BYTES + 100)

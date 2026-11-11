@@ -167,7 +167,12 @@ def parse_csv(
     max_col_seen = 0
 
     try:
-        for row_idx, raw_row in enumerate(reader, start=1):
+        for raw_row in reader:
+            # Skip empty or whitespace-only lines (e.g. trailing newlines)
+            if not raw_row or not any(c.strip() for c in raw_row if c):
+                continue
+
+            row_idx = len(rows) + 1
             if row_idx > settings.PARSER_MAX_CSV_ROWS:
                 raise ExtractionError(
                     f"CSV row count exceeds limit of {settings.PARSER_MAX_CSV_ROWS}",
