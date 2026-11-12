@@ -606,3 +606,4 @@ export default function DocumentDiffView({
     </div>
   );
 }
+
