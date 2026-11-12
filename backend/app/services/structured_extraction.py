@@ -22,8 +22,13 @@ from app.extraction.structured_schemas import (
 )
 from app.models.base import utc_now
 from app.models.document import Document, ExtractedField
-from app.models.enums import ExtractionMethod, ProcessingStatus, ReviewState
-from app.models.export import Invoice, InvoiceLineItem
+from app.models.enums import (
+    ExtractionMethod,
+    ProcessingStatus,
+    ReviewState,
+    TransactionStatus,
+)
+from app.models.export import ExportTransaction, Invoice, InvoiceLineItem
 from app.models.reconciliation import EvidenceReference
 from app.schemas.extraction import (
     DocumentExtractionResponse,
@@ -445,6 +450,7 @@ async def extract_document(
         field_summaries: list[ExtractedFieldSummary] = []
         low_confidence = False
         created_invoice_id: uuid.UUID | None = None
+        exp_tx: ExportTransaction | None = None
 
         if document_kind == DocumentKind.INVOICE:
             inv_data: InvoiceExtraction = validated_output
@@ -583,6 +589,26 @@ async def extract_document(
                 created_invoice_id = None
             else:
                 doc.processing_status = ProcessingStatus.EXTRACTED
+
+                # Link or create trade transaction so invoice is visible in Reconciliation Queue before payment
+                exp_ref = f"EXP-{inv_data.invoice_number.value}"
+                exp_tx = (
+                    db.query(ExportTransaction)
+                    .filter(ExportTransaction.transaction_reference == exp_ref)
+                    .first()
+                )
+                if not exp_tx:
+                    exp_tx = ExportTransaction(
+                        id=uuid.uuid4(),
+                        transaction_reference=exp_ref,
+                        exporter_name=str(inv_data.seller_name.value),
+                        buyer_name=str(inv_data.buyer_name.value),
+                        status=TransactionStatus.IN_PROGRESS,
+                        is_demo=doc.is_demo,
+                    )
+                    db.add(exp_tx)
+                    db.flush()
+
                 invoice = Invoice(
                     id=uuid.uuid4(),
                     invoice_number=str(inv_data.invoice_number.value),
@@ -592,6 +618,7 @@ async def extract_document(
                     currency=str(inv_data.currency.value).upper(),
                     total_amount=total_amt,
                     document_id=doc.id,
+                    export_transaction_id=exp_tx.id,
                     is_demo=doc.is_demo,
                 )
                 db.add(invoice)
@@ -729,6 +756,14 @@ async def extract_document(
 
         doc.updated_at = utc_now()
         db.commit()
+
+        if created_invoice_id and exp_tx:
+            from app.services.reconciliation_engine import reconcile_transaction
+
+            try:
+                reconcile_transaction(db, exp_tx.id)
+            except (RuntimeError, ValueError, Exception) as rec_err:  # noqa: BLE001
+                logger.warning(f"Pre-payment reconciliation trigger warning: {rec_err}")
 
         return DocumentExtractionResponse(
             document_id=doc.id,
