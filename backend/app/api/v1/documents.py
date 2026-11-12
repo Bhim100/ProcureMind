@@ -128,10 +128,14 @@ async def upload_document(
 def list_documents(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    is_demo: bool | None = Query(None, description="Filter demo records"),
     db: Session = Depends(get_db),
 ) -> list[DocumentRead]:
     """Retrieves all registered documents ordered by upload time descending."""
-    docs = db.query(Document).order_by(Document.upload_time.desc()).offset(skip).limit(limit).all()
+    query = db.query(Document)
+    if is_demo is not None:
+        query = query.filter(Document.is_demo == is_demo)
+    docs = query.order_by(Document.upload_time.desc()).offset(skip).limit(limit).all()
     return [DocumentRead.model_validate(d) for d in docs]
 
 

@@ -514,3 +514,14 @@ def test_dashboard_summary_aggregates(client_with_db: TestClient, db_session: Se
     assert "non_demo_payments" in breakdown
     assert breakdown["demo_payments"] >= 1
     assert breakdown["non_demo_payments"] >= 1
+
+    # Verify include_demo=false excludes demo data
+    res_no_demo = client_with_db.get("/api/v1/dashboard/summary?include_demo=false")
+    assert res_no_demo.status_code == 200
+    no_demo_data = res_no_demo.json()
+
+    # p_usd is demo, p_eur is non-demo; with include_demo=false, USD payment is excluded
+    no_demo_currencies = {v["currency"]: v for v in no_demo_data["payments_by_currency"]}
+    assert "EUR" in no_demo_currencies
+    assert "USD" not in no_demo_currencies
+    assert no_demo_data["sandbox_payments_count"] == 1

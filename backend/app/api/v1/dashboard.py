@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -35,19 +35,24 @@ router = APIRouter()
     summary="Get authoritative overview dashboard summary from PostgreSQL",
 )
 def get_dashboard_summary(
+    include_demo: bool = Query(
+        True,
+        description="Whether to include seeded demo data in dashboard metrics",
+    ),
     db: Session = Depends(get_db),
 ) -> DashboardSummaryResponse:
     """
     Computes authoritative counters, currency volumes, and demo breakdown directly from PostgreSQL.
     Strictly groups monetary totals by currency; never cross-sums different currencies.
+    When include_demo is False, filters out all seeded demo data (is_demo=False only).
     """
     # 1. Open transactions count
-    open_records = (
-        db.query(func.count(ExportTransaction.id))
-        .filter(ExportTransaction.status != TransactionStatus.CLOSED)
-        .scalar()
-        or 0
+    open_tx_q = db.query(func.count(ExportTransaction.id)).filter(
+        ExportTransaction.status != TransactionStatus.CLOSED
     )
+    if not include_demo:
+        open_tx_q = open_tx_q.filter(ExportTransaction.is_demo.is_(False))
+    open_records = open_tx_q.scalar() or 0
 
     # 2. Need review count
     discrepant_tx_subquery = (
@@ -60,46 +65,39 @@ def get_dashboard_summary(
         .filter(ReconciliationMatch.review_status == AllocationReviewStatus.SUGGESTED)
         .distinct()
     )
-    need_review_count = (
-        db.query(func.count(ExportTransaction.id))
-        .filter(
-            (ExportTransaction.status == TransactionStatus.DISCREPANT)
-            | (ExportTransaction.id.in_(discrepant_tx_subquery))
-            | (ExportTransaction.id.in_(suggested_match_tx_subquery))
-        )
-        .scalar()
-        or 0
+    need_review_q = db.query(func.count(ExportTransaction.id)).filter(
+        (ExportTransaction.status == TransactionStatus.DISCREPANT)
+        | (ExportTransaction.id.in_(discrepant_tx_subquery))
+        | (ExportTransaction.id.in_(suggested_match_tx_subquery))
     )
+    if not include_demo:
+        need_review_q = need_review_q.filter(ExportTransaction.is_demo.is_(False))
+    need_review_count = need_review_q.scalar() or 0
 
     # 3. Sandbox payments count
-    sandbox_payments = (
-        db.query(func.count(Payment.id))
-        .filter(Payment.environment == EnvironmentLabel.SANDBOX)
-        .scalar()
-        or 0
-    )
+    pmt_q = db.query(func.count(Payment.id)).filter(Payment.environment == EnvironmentLabel.SANDBOX)
+    if not include_demo:
+        pmt_q = pmt_q.filter(Payment.is_demo.is_(False))
+    sandbox_payments = pmt_q.scalar() or 0
 
     # 4. Documents by status
-    doc_status_rows = (
-        db.query(Document.processing_status, func.count(Document.id))
-        .group_by(Document.processing_status)
-        .all()
-    )
+    doc_q = db.query(Document.processing_status, func.count(Document.id))
+    if not include_demo:
+        doc_q = doc_q.filter(Document.is_demo.is_(False))
+    doc_status_rows = doc_q.group_by(Document.processing_status).all()
     documents_by_status = {status.value: count for status, count in doc_status_rows}
 
     # 5. Payments by currency (strictly grouped by currency)
-    currency_rows = (
-        db.query(
-            Payment.currency,
-            func.count(Payment.id),
-            func.sum(Payment.gross_amount),
-            func.sum(func.coalesce(Payment.fee_amount, Decimal("0.0000"))),
-            func.sum(func.coalesce(Payment.net_amount, Payment.gross_amount)),
-        )
-        .filter(Payment.status == PaymentStatus.COMPLETED)
-        .group_by(Payment.currency)
-        .all()
-    )
+    currency_q = db.query(
+        Payment.currency,
+        func.count(Payment.id),
+        func.sum(Payment.gross_amount),
+        func.sum(func.coalesce(Payment.fee_amount, Decimal("0.0000"))),
+        func.sum(func.coalesce(Payment.net_amount, Payment.gross_amount)),
+    ).filter(Payment.status == PaymentStatus.COMPLETED)
+    if not include_demo:
+        currency_q = currency_q.filter(Payment.is_demo.is_(False))
+    currency_rows = currency_q.group_by(Payment.currency).all()
     payments_by_currency: list[CurrencyVolume] = []
     for curr, count, gross, fee, net in currency_rows:
         gross_dec = Decimal(str(gross or 0))
@@ -154,44 +152,35 @@ def get_dashboard_summary(
         date_str = target_date.isoformat()
         next_date = target_date + timedelta(days=1)
 
-        tx_count = (
-            db.query(func.count(ExportTransaction.id))
-            .filter(
-                ExportTransaction.created_at >= target_date,
-                ExportTransaction.created_at < next_date,
-            )
-            .scalar()
-            or 0
+        tx_day_q = db.query(func.count(ExportTransaction.id)).filter(
+            ExportTransaction.created_at >= target_date,
+            ExportTransaction.created_at < next_date,
         )
-        matches_proposed = (
-            db.query(func.count(ReconciliationMatch.id))
-            .filter(
-                ReconciliationMatch.created_at >= target_date,
-                ReconciliationMatch.created_at < next_date,
-            )
-            .scalar()
-            or 0
+        matches_proposed_q = db.query(func.count(ReconciliationMatch.id)).filter(
+            ReconciliationMatch.created_at >= target_date,
+            ReconciliationMatch.created_at < next_date,
         )
-        matches_approved = (
-            db.query(func.count(ReconciliationMatch.id))
-            .filter(
-                ReconciliationMatch.review_status == AllocationReviewStatus.APPROVED,
-                ReconciliationMatch.updated_at >= target_date,
-                ReconciliationMatch.updated_at < next_date,
-            )
-            .scalar()
-            or 0
+        matches_approved_q = db.query(func.count(ReconciliationMatch.id)).filter(
+            ReconciliationMatch.review_status == AllocationReviewStatus.APPROVED,
+            ReconciliationMatch.updated_at >= target_date,
+            ReconciliationMatch.updated_at < next_date,
         )
-        payments_captured = (
-            db.query(func.count(Payment.id))
-            .filter(
-                Payment.status == PaymentStatus.COMPLETED,
-                Payment.created_at >= target_date,
-                Payment.created_at < next_date,
-            )
-            .scalar()
-            or 0
+        payments_captured_q = db.query(func.count(Payment.id)).filter(
+            Payment.status == PaymentStatus.COMPLETED,
+            Payment.created_at >= target_date,
+            Payment.created_at < next_date,
         )
+
+        if not include_demo:
+            tx_day_q = tx_day_q.filter(ExportTransaction.is_demo.is_(False))
+            matches_proposed_q = matches_proposed_q.filter(ReconciliationMatch.is_demo.is_(False))
+            matches_approved_q = matches_approved_q.filter(ReconciliationMatch.is_demo.is_(False))
+            payments_captured_q = payments_captured_q.filter(Payment.is_demo.is_(False))
+
+        tx_count = tx_day_q.scalar() or 0
+        matches_proposed = matches_proposed_q.scalar() or 0
+        matches_approved = matches_approved_q.scalar() or 0
+        payments_captured = payments_captured_q.scalar() or 0
 
         activity.append(
             ActivityDataPoint(

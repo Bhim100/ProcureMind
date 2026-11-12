@@ -11,8 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.enums import AllocationReviewStatus, EnvironmentLabel, PaymentStatus, TargetType
-from app.models.export import Invoice
+from app.models.enums import (
+    AllocationReviewStatus,
+    EnvironmentLabel,
+    PaymentStatus,
+    TargetType,
+    TransactionStatus,
+)
+from app.models.export import ExportTransaction, Invoice
 from app.models.payment import Payment
 from app.models.reconciliation import Allocation, HumanDecision
 from app.schemas.payment import PaymentRead
@@ -182,6 +188,125 @@ def initiate_invoice_payment(
         invoice_number=invoice.invoice_number,
         approval_url=approval_url,
     )
+
+
+@router.post(
+    "/invoices/{invoice_id}/simulate-capture",
+    response_model=PaymentRead,
+    summary="Simulate an approved PayPal Sandbox capture without requiring third-party credentials",
+)
+def simulate_paypal_capture(
+    invoice_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> PaymentRead:
+    """
+    Simulates a compliant PayPal Sandbox capture for an approved invoice:
+    - Enforces human auditor approval (HumanDecision) gate.
+    - Ensures invoice has remaining balance.
+    - Computes realistic PayPal merchant fee (3.49% + $0.49).
+    - Creates or links an ExportTransaction so it can be reconciled.
+    - Triggers the deterministic reconciliation engine.
+    - Persists with environment='sandbox' and audit trace.
+    """
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).with_for_update().first()
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+
+    # 1. Verify human auditor approval
+    approval = (
+        db.query(HumanDecision)
+        .filter(
+            HumanDecision.target_type == TargetType.INVOICE,
+            HumanDecision.target_id == invoice.id,
+            HumanDecision.decision == "approved",
+        )
+        .first()
+    )
+    if not approval:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Payment cannot be simulated. Invoice {invoice.invoice_number} has not been approved by an auditor.",
+        )
+
+    # 2. Verify remaining balance
+    approved_allocs = (
+        db.query(Allocation)
+        .filter(
+            Allocation.invoice_id == invoice.id,
+            Allocation.review_status == AllocationReviewStatus.APPROVED,
+        )
+        .all()
+    )
+    zero_dec = invoice.total_amount * 0
+    total_credit = sum((a.allocated_amount for a in approved_allocs if not a.is_reversal), zero_dec)
+    total_reversal = sum((a.allocated_amount for a in approved_allocs if a.is_reversal), zero_dec)
+    rem_balance = invoice.total_amount - (total_credit - total_reversal)
+
+    if rem_balance <= zero_dec:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invoice {invoice.invoice_number} is already fully settled.",
+        )
+
+    # 3. Create or link ExportTransaction if missing
+    if not invoice.export_transaction_id:
+        exp_ref = f"EXP-{invoice.invoice_number}"
+        exp_tx = (
+            db.query(ExportTransaction)
+            .filter(ExportTransaction.transaction_reference == exp_ref)
+            .first()
+        )
+        if not exp_tx:
+            exp_tx = ExportTransaction(
+                id=uuid.uuid4(),
+                transaction_reference=exp_ref,
+                exporter_name=invoice.seller_name,
+                buyer_name=invoice.buyer_name,
+                status=TransactionStatus.IN_PROGRESS,
+                is_demo=invoice.is_demo,
+            )
+            db.add(exp_tx)
+            db.flush()
+        invoice.export_transaction_id = exp_tx.id
+        db.add(invoice)
+
+    # 4. Standard PayPal fee calculation (3.49% + $0.49)
+    fee_rate = Decimal("0.0349")
+    fixed_fee = Decimal("0.4900")
+    fee_amount = (invoice.total_amount * fee_rate + fixed_fee).quantize(Decimal("0.01"))
+    net_amount = invoice.total_amount - fee_amount
+
+    sim_id = uuid.uuid4().hex[:10].upper()
+    now = datetime.now(UTC)
+
+    payment = Payment(
+        id=uuid.uuid4(),
+        provider="paypal",
+        invoice_id=invoice.id,
+        provider_order_id=f"SIM-ORDER-{sim_id}",
+        provider_capture_id=f"SIM-CAP-{sim_id}",
+        invoice_reference=invoice.invoice_number,
+        currency=invoice.currency,
+        gross_amount=invoice.total_amount,
+        fee_amount=fee_amount,
+        net_amount=net_amount,
+        status=PaymentStatus.COMPLETED,
+        environment=EnvironmentLabel.SANDBOX,
+        export_transaction_id=invoice.export_transaction_id,
+        is_demo=invoice.is_demo,
+        event_time=now,
+        description=f"Simulated PayPal Sandbox checkout capture for Invoice {invoice.invoice_number}",
+    )
+    db.add(payment)
+    db.flush()
+
+    # 5. Trigger deterministic reconciliation
+    if payment.export_transaction_id:
+        reconcile_transaction(db=db, transaction_id=payment.export_transaction_id)
+
+    db.commit()
+    db.refresh(payment)
+    return PaymentRead.model_validate(payment)
 
 
 @router.post(
