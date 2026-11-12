@@ -143,9 +143,13 @@ export default function PaymentsPage() {
       queryClient.invalidateQueries({ queryKey: ["reconciliationQueue"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
     } catch (err: any) {
+      const msg =
+        err.message === "Failed to fetch"
+          ? "Unable to connect to the backend server (http://localhost:8000). Please check that the backend is running."
+          : err.message || "Failed to simulate payment capture.";
       setCheckoutNotice({
         type: "error",
-        message: err.message || "Failed to simulate payment capture.",
+        message: msg,
       });
     } finally {
       setIsSimulating(false);
@@ -404,36 +408,62 @@ export default function PaymentsPage() {
               {isApproved ? (
                 <div className="pt-2 space-y-4">
                   {/* Direct Instant Sandbox Payment (No phone or PayPal account required) */}
-                  <div className="p-4 rounded-xl bg-gradient-to-br from-[#0c1a2e] to-[#081220] border border-emerald-500/30 space-y-3 shadow-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white flex items-center">
-                        <CreditCard className="w-4 h-4 text-emerald-400 mr-1.5" />
-                        Simulate PayPal Sandbox Payment
-                      </span>
-                      <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold">
-                        Instant · No Login Needed
-                      </span>
+                  {Number(activeInvoice?.remaining_balance ?? 1) <= 0 ? (
+                    <div className="p-4 rounded-xl bg-[#081220] border border-emerald-500/30 text-emerald-300 text-xs flex flex-col gap-3 shadow-lg">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-white flex items-center">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mr-2" />
+                          Invoice is Fully Settled & Reconciled
+                        </span>
+                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold">
+                          Remaining Balance: {activeInvoice?.currency} 0.00
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Payment for invoice <strong className="text-slate-200">{activeInvoice?.invoice_number}</strong> has been completely captured and allocated in the ledger.
+                      </p>
+                      <div className="pt-1">
+                        <Link
+                          href="/reconciliation"
+                          className="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors shadow-md"
+                        >
+                          <span>Open in Reconciliation Queue</span>
+                          <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                        </Link>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Bypasses PayPal SMS rate-limits. Executes an authoritative simulated PayPal Sandbox capture in PostgreSQL for {activeInvoice?.currency} {activeInvoice?.total_amount} with standard merchant fee deductions, immediately triggering the reconciliation engine!
-                    </p>
-                    <button
-                      onClick={handleSimulatePayment}
-                      disabled={isSimulating}
-                      className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
-                    >
-                      {isSimulating ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin mr-1.5" />
-                          <span>Simulating Sandbox Capture...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>⚡ Simulate Sandbox Payment ({activeInvoice?.currency} {activeInvoice?.total_amount})</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-gradient-to-br from-[#0c1a2e] to-[#081220] border border-emerald-500/30 space-y-3 shadow-lg">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center">
+                          <CreditCard className="w-4 h-4 text-emerald-400 mr-1.5" />
+                          Simulate PayPal Sandbox Payment
+                        </span>
+                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold">
+                          Instant · No Login Needed
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Bypasses PayPal SMS rate-limits. Executes an authoritative simulated PayPal Sandbox capture in PostgreSQL for {activeInvoice?.currency} {activeInvoice?.remaining_balance || activeInvoice?.total_amount} with standard merchant fee deductions, immediately triggering the reconciliation engine!
+                      </p>
+                      <button
+                        onClick={handleSimulatePayment}
+                        disabled={isSimulating}
+                        className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isSimulating ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin mr-1.5" />
+                            <span>Simulating Sandbox Capture...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>⚡ Simulate Sandbox Payment ({activeInvoice?.currency} {activeInvoice?.remaining_balance || activeInvoice?.total_amount})</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
 
                   {/* Standard PayPal SDK Container */}
                   <div className="pt-2 border-t border-[#1e293b]">
