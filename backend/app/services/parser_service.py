@@ -22,6 +22,72 @@ from app.storage.interface import LocalStorageService
 logger = logging.getLogger(__name__)
 
 
+def parse_document_bytes(
+    file_bytes: bytes,
+    document_id: str,
+    filename: str,
+    media_type: str,
+    ocr_func: Callable[..., list[ParsedTextBlock]] | None = None,
+) -> ParsedDocument:
+    """Parse document bytes in memory into a ParsedDocument without committing database state.
+
+    Allows deterministic extraction without prematurely releasing database locks.
+    """
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    parsed: ParsedDocument
+    if ext == "pdf" or media_type == "application/pdf":
+        parsed = parse_pdf(
+            file_bytes=file_bytes,
+            document_id=document_id,
+            filename=filename,
+            media_type=media_type,
+            ocr_func=ocr_func or perform_ocr,
+        )
+    elif (
+        ext == "xlsx"
+        or media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ):
+        parsed = parse_xlsx(
+            file_bytes=file_bytes,
+            document_id=document_id,
+            filename=filename,
+            media_type=media_type,
+        )
+    elif ext == "csv" or media_type == "text/csv":
+        parsed = parse_csv(
+            file_bytes=file_bytes,
+            document_id=document_id,
+            filename=filename,
+            media_type=media_type,
+        )
+    elif ext in ("png", "jpg", "jpeg") or media_type.startswith("image/"):
+        parsed = parse_image(
+            file_bytes=file_bytes,
+            document_id=document_id,
+            filename=filename,
+            media_type=media_type,
+            ocr_func=ocr_func or perform_ocr,
+        )
+    else:
+        logger.warning(f"Unsupported file format for parsing document {document_id}")
+        raise ExtractionError(
+            f"Unsupported file type for parsing: {ext}",
+            safe_detail=f"Unsupported file type for parsing: {ext}",
+        )
+
+    # Enforce total response payload budget
+    output_json_size = len(parsed.model_dump_json().encode("utf-8"))
+    if output_json_size > settings.PARSER_MAX_TOTAL_OUTPUT_BYTES:
+        logger.warning(f"Parsed document output {document_id} exceeded maximum payload budget")
+        raise ExtractionError(
+            "Document parsed output exceeds maximum payload budget",
+            safe_detail="Document parsed output exceeds maximum payload budget",
+        )
+
+    return parsed
+
+
 def parse_document(
     db: Session,
     document_id: str,
@@ -73,54 +139,17 @@ def parse_document(
         ) from exc
 
     filename = doc.original_filename or "document"
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     media_type = doc.media_type or "application/octet-stream"
 
     parsed: ParsedDocument
     try:
-        if ext == "pdf" or media_type == "application/pdf":
-            parsed = parse_pdf(
-                file_bytes=file_bytes,
-                document_id=str(doc.id),
-                filename=filename,
-                media_type=media_type,
-                ocr_func=ocr_func or perform_ocr,
-            )
-        elif (
-            ext == "xlsx"
-            or media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ):
-            parsed = parse_xlsx(
-                file_bytes=file_bytes,
-                document_id=str(doc.id),
-                filename=filename,
-                media_type=media_type,
-            )
-        elif ext == "csv" or media_type == "text/csv":
-            parsed = parse_csv(
-                file_bytes=file_bytes,
-                document_id=str(doc.id),
-                filename=filename,
-                media_type=media_type,
-            )
-        elif ext in ("png", "jpg", "jpeg") or media_type.startswith("image/"):
-            parsed = parse_image(
-                file_bytes=file_bytes,
-                document_id=str(doc.id),
-                filename=filename,
-                media_type=media_type,
-                ocr_func=ocr_func or perform_ocr,
-            )
-        else:
-            logger.warning(f"Unsupported file format for parsing document {doc.id}")
-            if not is_terminal:
-                doc.processing_status = ProcessingStatus.NEEDS_REVIEW
-                doc.updated_at = utc_now()
-                db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported file type for parsing: {ext}",
-            )
+        parsed = parse_document_bytes(
+            file_bytes=file_bytes,
+            document_id=str(doc.id),
+            filename=filename,
+            media_type=media_type,
+            ocr_func=ocr_func,
+        )
     except ExtractionError as e:
         logger.error(f"Deterministic extraction failed for document {doc.id}")
         if not is_terminal:
@@ -143,19 +172,6 @@ def parse_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Document parsing failed",
         ) from exc
-
-    # Enforce total response payload budget
-    output_json_size = len(parsed.model_dump_json().encode("utf-8"))
-    if output_json_size > settings.PARSER_MAX_TOTAL_OUTPUT_BYTES:
-        logger.warning(f"Parsed document output {doc.id} exceeded maximum payload budget")
-        if not is_terminal:
-            doc.processing_status = ProcessingStatus.NEEDS_REVIEW
-            doc.updated_at = utc_now()
-            db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Document parsed output exceeds maximum payload budget",
-        )
 
     # Update document metadata in PostgreSQL
     if parsed.page_count and parsed.page_count > 0:

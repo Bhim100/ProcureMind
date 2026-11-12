@@ -28,6 +28,12 @@ from app.schemas.export import (
     ShippingBillCreate,
     ShippingBillRead,
 )
+from app.schemas.extraction import (
+    DocumentExtractionRequest,
+    DocumentExtractionResponse,
+    DocumentKind,
+    ExtractedFieldSummary,
+)
 from app.schemas.investigation import (
     AuthoritativeFinancialFacts,
     InvestigationRequest,
@@ -121,6 +127,9 @@ __all__ = [
     # Document
     "DocumentBase",
     "DocumentCreate",
+    "DocumentExtractionRequest",
+    "DocumentExtractionResponse",
+    "DocumentKind",
     "DocumentParseMethod",
     "DocumentRead",
     "DocumentUpdate",
@@ -136,6 +145,7 @@ __all__ = [
     "ExtractedFieldBase",
     "ExtractedFieldCreate",
     "ExtractedFieldRead",
+    "ExtractedFieldSummary",
     "HumanDecisionBase",
     "HumanDecisionCreate",
     "HumanDecisionRead",

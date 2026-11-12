@@ -5,8 +5,11 @@ Factory for instantiating the active LLM investigation provider.
 import logging
 
 from app.core.config import settings
+from app.services.llm.extraction_interface import StructuredExtractionProviderInterface
+from app.services.llm.gemini_extraction_provider import GeminiExtractionProvider
 from app.services.llm.gemini_provider import GeminiLLMProvider
 from app.services.llm.interface import LLMProviderInterface
+from app.services.llm.mock_extraction_provider import MockExtractionProvider
 from app.services.llm.mock_provider import MockLLMProvider
 from app.services.llm.openai_provider import OpenAILLMProvider
 
@@ -47,3 +50,22 @@ def get_llm_provider() -> LLMProviderInterface | None:
         "Unrecognized LLM_PROVIDER '%s'; falling back to unavailable mode.", provider_name
     )
     return None
+
+
+def get_extraction_provider() -> StructuredExtractionProviderInterface:
+    """Returns the configured structured extraction provider based on environment settings.
+
+    Returns GeminiExtractionProvider or MockExtractionProvider.
+    """
+    provider_name = (settings.LLM_PROVIDER or "gemini").lower()
+
+    if provider_name == "mock":
+        return MockExtractionProvider()
+
+    # Default to GeminiExtractionProvider. If api_key is missing,
+    # extract_structured raises ExtractionProviderError with status_code=503.
+    return GeminiExtractionProvider(
+        api_key=settings.LLM_API_KEY,
+        model=settings.LLM_MODEL or "gemini-3.8-flash",
+        base_url=settings.LLM_BASE_URL,
+    )

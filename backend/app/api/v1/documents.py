@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.models.document import Document
 from app.models.enums import ProcessingStatus
 from app.schemas.document import DocumentRead, DocumentUploadResponse, DownloadUrlResponse
+from app.schemas.extraction import DocumentExtractionRequest, DocumentExtractionResponse
 from app.schemas.parser import ParsedDocument
 from app.services.document_service import (
     compute_sha256,
@@ -28,7 +29,10 @@ from app.services.document_service import (
     validate_uploaded_document,
     verify_download_token,
 )
+from app.services.llm.extraction_interface import StructuredExtractionProviderInterface
+from app.services.llm.factory import get_extraction_provider
 from app.services.parser_service import parse_document
+from app.services.structured_extraction import extract_document
 from app.storage.interface import get_storage_service
 
 router = APIRouter()
@@ -238,3 +242,29 @@ def parse_document_endpoint(
     Protects terminal states ('approved', 'rejected') from modification.
     """
     return parse_document(db=db, document_id=str(document_id))
+
+
+@router.post(
+    "/{document_id}/extract",
+    response_model=DocumentExtractionResponse,
+    summary="Extract structured data (invoice, receipt, or form) using validated LLM",
+)
+async def extract_document_endpoint(
+    document_id: uuid.UUID,
+    payload: DocumentExtractionRequest,
+    db: Session = Depends(get_db),
+    provider: StructuredExtractionProviderInterface = Depends(get_extraction_provider),
+) -> DocumentExtractionResponse:
+    """Extract structured data from a parsed document using LLM.
+
+    Accepts an explicit document_kind ('invoice', 'receipt', or 'form').
+    Reconstructs provenance from Phase 7 source index.
+    Enforces schema validation, retry safety, arithmetic verification, and idempotency.
+    Protects terminal states ('approved', 'rejected') and serializes concurrent requests.
+    """
+    return await extract_document(
+        db=db,
+        document_id=str(document_id),
+        document_kind=payload.document_kind,
+        provider=provider,
+    )

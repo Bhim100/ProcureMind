@@ -910,3 +910,93 @@ flowchart TD
    - Invoices or documents previously transitioned to `approved` or `rejected` are permanently protected against regression: parsing success or failure will never mutate their status to `parsed` or `needs_review`.
 
 
+## 10. LLM Structured Extraction & Provenance Tracking Architecture (Phase 8)
+
+Phase 8 provides validated, provenance-tracked structured extraction for commercial invoices, retail receipts, and generic forms/key-value entities, consuming deterministic `ParsedDocument` output from Phase 7.
+
+```mermaid
+flowchart TD
+    Req["POST /api/v1/documents/{id}/extract
+    (document_kind: invoice | receipt | form)"] --> LockGuard["1. In-process asyncio.Lock(doc_id)
+    (Prevents Event Loop Blocking)"]
+    LockGuard --> DBLock["2. SELECT ... FOR UPDATE
+    (PostgreSQL Cross-Worker Row Lock)"]
+    DBLock --> TermCheck{"3. Terminal Document?
+    (approved | rejected)"}
+    TermCheck -->|Yes| HTTP400["400 Bad Request
+    No Mutation"]
+    TermCheck -->|No| ReviewCheck{"4. needs_review with
+    prior LLM fields?"}
+    ReviewCheck -->|Yes| HTTP409["409 Conflict
+    Preserve Prior Fields"]
+    ReviewCheck -->|No| ExtractedCheck{"5. Already extracted?"}
+    ExtractedCheck -->|Yes| Idempotent["Return Existing Records
+    200 OK"]
+    ExtractedCheck -->|No| ParseBytes["6. parse_document_bytes()
+    In-memory, No DB Commit, Lock Held"]
+    ParseBytes --> SourceIdx["7. Build SourceIndex
+    [source_id] -> raw_text, page, row, bbox"]
+    SourceIdx --> PromptRender["8. Load Prompt Template
+    (invoice_v1.md / receipt_v1.md / form_v1.md)
+    Document text in delimiters as UNTRUSTED DATA"]
+    PromptRender --> LLMCall["9. Provider extract_structured()
+    (Gemini REST API / Mock)"]
+    LLMCall --> Validate{"10. Pydantic v2
+    Schema Validation"}
+    Validate -->|Fails Once| SanitizedRetry["11. Sanitized Retry Prompt
+    (Path + Error Type only; No PII/Input Values)"]
+    SanitizedRetry --> ValidateRetry{"12. Validate Retry"}
+    ValidateRetry -->|Fails Again| MarkNeedsReview["Mark needs_review
+    400 Bad Request, Rollback"]
+    Validate -->|Passes| ProvenanceRecon["13. Server Provenance Reconstruction
+    Lookup cited source_ids in SourceIndex"]
+    ValidateRetry -->|Passes| ProvenanceRecon
+    ProvenanceRecon --> Arithmetic{"14. Arithmetic & Confidence Gate
+    (confidence >= 0.85 & total = subtotal + tax + charges - discounts)"}
+    Arithmetic -->|Mismatch / Low Conf| SaveFieldsOnly["Save ExtractedFields (PENDING)
+    Save EvidenceReferences
+    doc.status = needs_review
+    created_invoice_id = None"]
+    Arithmetic -->|Passed| CreateInvoice["Save ExtractedFields (PENDING)
+    Save EvidenceReferences
+    Create Invoice & InvoiceLineItems
+    doc.status = extracted
+    created_invoice_id = UUID"]
+    SaveFieldsOnly --> CommitAtomic["15. db.commit() Atomic
+    Release Row Lock & Async Lock"]
+    CreateInvoice --> CommitAtomic
+```
+
+### Key Technical Guarantees
+
+1. **Dual-Layer Concurrency Model**:
+   - **In-process `asyncio.Lock`**: Serializes concurrent requests for the exact same document ID within a worker before initiating synchronous blocking database queries, preventing event loop thread starvation.
+   - **PostgreSQL `SELECT ... FOR UPDATE`**: Acquires exclusive row locks across independent workers and database sessions, preventing race conditions, duplicate fields, or conflicting status updates.
+   - **Lock-preserving Parsing**: Uses `parse_document_bytes()` during extraction without emitting intermediate database commits, preserving the row lock from request entry to final atomic commit.
+
+2. **Server-Authoritative Provenance (Rule 2)**:
+   - The LLM is supplied with bracketed source identifiers (e.g. `sheet:Sheet1:row:1:cell:0` or `page:1:block:2`) and is required to cite them in `source_ids`.
+   - The server reconstructs `raw_value`, `page_number`, `row_number`, and `bounding_box` directly from the server-side `SourceIndex`.
+   - Model-supplied coordinates or raw values are never trusted.
+   - For every extracted field, an `EvidenceReference` row is persisted, strictly linking the source document and extracted field.
+
+3. **Strict Validation & Sanitized Retry**:
+   - Output is validated against strict Pydantic v2 models (`InvoiceExtraction`, `ReceiptExtraction`, `FormExtraction`) using Python 3.11 generic containers (`ExtractedFieldData[T]`).
+   - Nullability rules are strictly enforced: `is_present=False` $\iff$ `value is None`, `source_ids=[]`, and non-empty `null_reason`.
+   - On schema validation failure, the pipeline retries once with a sanitized prompt containing only field paths and validation error types; rejected input values and potential PII are omitted.
+   - Double validation failure marks the document `needs_review` and returns HTTP 400 without creating invoice or extraction field records.
+
+4. **Financial Accuracy & Arithmetic Verification (Rule 1)**:
+   - All amounts and unit prices are parsed and manipulated using Python `Decimal` / `NUMERIC(18, 4)`. Binary floats are strictly prohibited.
+   - Decimal arithmetic check verifies $\text{expected\_total} = \text{subtotal} + \text{tax} + \text{charges} - \text{discounts}$.
+   - If `subtotal` is missing from the document, a derived subtotal is computed from line items for the arithmetic check only; it is never persisted as an `ExtractedField`.
+   - Any arithmetic mismatch or confidence below `0.85` sets document status to `needs_review` and halts `Invoice` creation while preserving `ExtractedField` rows for human review.
+
+5. **No Autonomous Approvals & Terminal Protection (Rule 3)**:
+   - All `ExtractedField` records are saved with `ReviewState.PENDING`.
+   - No `HumanDecision`, payment, allocation, or match is autonomously created or approved.
+   - Terminal documents in `approved` or `rejected` status reject extraction requests with HTTP 400.
+   - Re-extracting a `needs_review` document that already contains LLM fields returns HTTP 409 Conflict to protect prior auditor/extraction history.
+
+
+
