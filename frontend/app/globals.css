@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #080d1a;
+  --foreground: #f8fafc;
 }
 
 body {
@@ -14,3 +14,32 @@ body {
   min-height: 100vh;
 }
 
+/* Custom Dark Scrollbars for WebKit (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080d1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+  border: 2px solid #080d1a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+::-webkit-scrollbar-corner {
+  background: #080d1a;
+}
+
+/* Custom Dark Scrollbars for Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b #080d1a;
+}

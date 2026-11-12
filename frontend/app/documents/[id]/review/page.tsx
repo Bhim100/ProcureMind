@@ -16,8 +16,10 @@ import {
   X,
   Lock,
   Sparkles,
+  GitCompare,
 } from "lucide-react";
 import AppShell from "@/components/layout/AppShell";
+import DocumentDiffView from "@/components/documents/DocumentDiffView";
 import {
   getDocumentFields,
   getPreviewUrl,
@@ -25,8 +27,10 @@ import {
   getFieldAuditTrail,
   parseDocument,
   extractDocument,
+  getDocuments,
   ExtractedFieldRead,
   FieldAuditLogRead,
+  DocumentRead,
 } from "@/lib/api";
 import { useAuditorSession } from "@/lib/auditor-session";
 
@@ -46,6 +50,16 @@ export default function DocumentReviewPage({ params }: PageProps) {
   const [correctionNotes, setCorrectionNotes] = useState("");
   const [reviewerInput, setReviewerInput] = useState(reviewer);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Active review tab
+  const [activeTab, setActiveTab] = useState<"fields" | "compare">("fields");
+
+  // Fetch all documents for metadata display & comparison
+  const { data: allDocs = [] } = useQuery<DocumentRead[]>({
+    queryKey: ["documents"],
+    queryFn: () => getDocuments(),
+  });
+  const currentDoc = allDocs.find((d) => d.id === documentId);
 
   // Field for viewing audit trail
   const [viewingAuditField, setViewingAuditField] = useState<ExtractedFieldRead | null>(null);
@@ -200,8 +214,35 @@ export default function DocumentReviewPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Two-Pane Review Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[640px]">
+        {/* Review Mode Tabs */}
+        <div className="flex items-center space-x-2 border-b border-[#1e293b] pb-2">
+          <button
+            onClick={() => setActiveTab("fields")}
+            className={`inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === "fields"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                : "bg-[#0c1322] border border-[#1e293b] text-slate-400 hover:text-white hover:bg-[#121c2e]"
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>📄 Grounded Field Review</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("compare")}
+            className={`inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === "compare"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                : "bg-[#0c1322] border border-[#1e293b] text-slate-400 hover:text-white hover:bg-[#121c2e]"
+            }`}
+          >
+            <GitCompare className="w-4 h-4" />
+            <span>⚖️ Cross-Document Diff & Compare</span>
+          </button>
+        </div>
+
+        {activeTab === "fields" ? (
+          /* Two-Pane Review Layout */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[640px]">
           {/* Left Pane: Inline Document Preview */}
           <div className="lg:col-span-6 bg-[#0c1322] border border-[#1e293b] rounded-2xl flex flex-col overflow-hidden shadow-xl">
             <div className="px-4 py-3 border-b border-[#1e293b] flex items-center justify-between bg-[#080d1a]/60">
@@ -380,6 +421,13 @@ export default function DocumentReviewPage({ params }: PageProps) {
             </div>
           </div>
         </div>
+        ) : (
+          <DocumentDiffView
+            baseDocumentId={documentId}
+            baseDocumentName={currentDoc?.original_filename || "Current Document"}
+            baseDocumentType={currentDoc?.document_type || "Document"}
+          />
+        )}
       </div>
 
       {/* Field Correction Modal */}
