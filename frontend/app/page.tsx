@@ -1,267 +1,397 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, CheckCircle2, AlertCircle, Database, Server, ShieldCheck, RefreshCw, FileText, ArrowRight, CreditCard } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  CreditCard,
+  FileText,
+  CheckSquare,
+  ShieldAlert,
+  ShieldCheck,
+  RefreshCw,
+  Coins,
+  FileCheck,
+  TrendingUp,
+} from "lucide-react";
+import AppShell from "@/components/layout/AppShell";
+import { useDemoFilter } from "@/lib/demo-filter-context";
+import {
+  getDashboardSummary,
+  DashboardSummaryResponse,
+  CurrencyVolume,
+  ActivityDataPoint,
+} from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export default function OverviewPage() {
+  const { includeDemo, setIncludeDemo, toggleDemo } = useDemoFilter();
 
-interface HealthData {
-  status: string;
-  service: string;
-  environment: string;
-  timestamp: string;
-}
-
-interface ReadinessData {
-  status: string;
-  service: string;
-  environment: string;
-  database: {
-    status: string;
-    database?: string;
-    error?: string;
-  };
-  storage: {
-    backend: string;
-    status: string;
-  };
-  secondary_services: {
-    falkordb: string;
-    chroma: string;
-  };
-  timestamp: string;
-}
-
-export default function Home() {
   const {
-    data: health,
-    error: healthError,
-    isLoading: healthLoading,
-    refetch: refetchHealth,
-  } = useQuery<HealthData>({
-    queryKey: ["health"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/v1/health`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
+    data: summary,
+    isLoading,
+    isRefetching,
+    refetch,
+  } = useQuery<DashboardSummaryResponse>({
+    queryKey: ["dashboard-summary", includeDemo],
+    queryFn: () => getDashboardSummary({ include_demo: includeDemo }),
     refetchInterval: 10000,
   });
 
-  const {
-    data: readiness,
-    error: readinessError,
-    isLoading: readinessLoading,
-    refetch: refetchReadiness,
-  } = useQuery<ReadinessData>({
-    queryKey: ["readiness"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/v1/ready`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-    refetchInterval: 10000,
-  });
-
-  const handleRefresh = () => {
-    refetchHealth();
-    refetchReadiness();
-  };
+  const totalDocuments = summary?.documents_by_status
+    ? Object.values(summary.documents_by_status).reduce((acc, curr) => acc + curr, 0)
+    : 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Top Navigation */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="h-9 w-9 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              PM
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="font-semibold text-lg tracking-tight">ProcureMind</h1>
-                <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full">
-                  Phase 0: Foundation
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">Autonomous Invoice & PO Reconciliation</p>
-            </div>
+    <AppShell activeNav="overview">
+      <div className="space-y-8 p-6 max-w-7xl mx-auto">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Executive Overview</h1>
+            <p className="text-xs text-slate-400 mt-1">
+              Real-time audit intelligence, PostgreSQL source-of-truth balances, and PayPal Sandbox settlement.
+            </p>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <Link
-              href="/payments"
-              className="inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-all"
-            >
-              <CreditCard className="w-3.5 h-3.5 mr-1.5" />
-              PayPal Sandbox (Phase 5)
-            </Link>
-            <Link
-              href="/documents"
-              className="inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all"
-            >
-              <FileText className="w-3.5 h-3.5 mr-1.5" />
-              Document Registry (Phase 2)
-            </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Seeded Data Toggle Switch */}
+            <div className="flex items-center space-x-3 bg-[#0c1322] border border-[#1e293b] rounded-xl px-3.5 py-1.5 shadow-sm">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-slate-200">Include Seeded Demo Data</span>
+                <span className="text-[10px] text-slate-400">
+                  {includeDemo ? "Showing all data including seeds" : "Filtering to uploaded docs & real data only"}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={includeDemo}
+                onClick={toggleDemo}
+                className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  includeDemo ? "bg-blue-600" : "bg-slate-700"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    includeDemo ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                  includeDemo
+                    ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                    : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                }`}
+              >
+                {includeDemo ? "All Seeds" : "Uploaded Only"}
+              </span>
+            </div>
+
             <button
-              onClick={handleRefresh}
-              className="inline-flex items-center text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-100 transition-colors"
+              onClick={() => refetch()}
+              disabled={isRefetching}
+              className="inline-flex items-center px-3.5 py-2 rounded-xl border border-[#1e293b] bg-[#0c1322] hover:bg-[#1e293b] text-xs font-medium text-slate-300 transition-all disabled:opacity-50"
             >
-              <RefreshCw className="h-3 w-3 mr-1.5" />
-              Refresh Status
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isRefetching ? "animate-spin" : ""}`} />
+              Refresh Overview
             </button>
-            <div className="flex items-center space-x-1.5 text-xs text-slate-600 border-l border-slate-200 pl-3">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>App Shell Active</span>
+          </div>
+        </div>
+
+        {/* Filter Alert Banner when demo data is disabled */}
+        {!includeDemo && (
+          <div className="flex items-center justify-between p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs shadow-md">
+            <div className="flex items-center space-x-2.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <span>
+                <strong>Uploaded Data Mode Active:</strong> Seeded demo records are excluded. Showing only your uploaded documents, invoices, and live non-demo records (<code className="font-mono text-[11px] bg-emerald-900/40 px-1 py-0.5 rounded">is_demo = false</code>).
+              </span>
+            </div>
+            <button
+              onClick={() => setIncludeDemo(true)}
+              className="text-[11px] font-semibold underline hover:text-emerald-200 ml-4 flex-shrink-0"
+            >
+              Reset to show all seeded data
+            </button>
+          </div>
+        )}
+
+        {/* Top 3 Metric Cards (Dark Navy Screenshot Style) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+          <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-5 shadow-xl space-y-3">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+              Open records
+            </span>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-white">
+                {isLoading ? "..." : summary?.open_records_count ?? 0}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">Across export transactions</p>
+          </div>
+
+          <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-5 shadow-xl space-y-3">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+              Need review
+            </span>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-amber-400">
+                {isLoading ? "..." : summary?.need_review_count ?? 0}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">Human decision required</p>
+          </div>
+
+          <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-5 shadow-xl space-y-3">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+              Sandbox payments
+            </span>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-3xl font-extrabold text-blue-400">
+                {isLoading ? "..." : summary?.sandbox_payments_count ?? 0}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">Simulated PayPal events</p>
+          </div>
+        </div>
+
+        {/* Quick Workflow Action Banners */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Link
+            href="/reconciliation"
+            className="p-5 rounded-2xl bg-gradient-to-br from-blue-900/30 to-[#0c1322] border border-blue-500/30 hover:border-blue-400 transition-all group shadow-lg"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400">
+                  <CheckSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
+                    Reconciliation Queue
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Inspect matches & decide</p>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-blue-300 transition-colors" />
+            </div>
+          </Link>
+
+          <Link
+            href="/documents"
+            className="p-5 rounded-2xl bg-[#0c1322] border border-[#1e293b] hover:border-slate-600 transition-all group shadow-lg"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-slate-800 text-slate-300">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white group-hover:text-slate-200 transition-colors">
+                    Document Registry
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Upload & verify hashes</p>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-slate-200 transition-colors" />
+            </div>
+          </Link>
+
+          <Link
+            href="/payments"
+            className="p-5 rounded-2xl bg-[#0c1322] border border-[#1e293b] hover:border-slate-600 transition-all group shadow-lg"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
+                    PayPal Sandbox
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Checkout & receipts</p>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-amber-300 transition-colors" />
+            </div>
+          </Link>
+        </div>
+
+        {/* Currency Volumes & Provenance Breakdown */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left: Payment Volume Grouped by Currency (Strictly no cross-currency sums!) */}
+          <div className="lg:col-span-7 bg-[#0c1322] border border-[#1e293b] rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#1e293b] pb-4">
+              <div className="flex items-center space-x-2">
+                <Coins className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-base font-semibold text-white">Payment Volumes by Currency</h2>
+              </div>
+              <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                PostgreSQL Authoritative
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              In accordance with financial compliance rules, monetary figures are strictly grouped by currency
+              and never combined into a single floating-point sum.
+            </p>
+
+            {isLoading ? (
+              <div className="p-8 text-center text-slate-500 text-xs">Computing currency aggregates...</div>
+            ) : !summary?.payments_by_currency || summary.payments_by_currency.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-xs">No captured payments recorded yet.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300 divide-y divide-[#1e293b]">
+                  <thead className="bg-[#080d1a] text-[11px] font-semibold text-slate-400 uppercase">
+                    <tr>
+                      <th className="px-4 py-2.5">Currency</th>
+                      <th className="px-4 py-2.5">Payments</th>
+                      <th className="px-4 py-2.5 text-right">Total Gross</th>
+                      <th className="px-4 py-2.5 text-right">Fees</th>
+                      <th className="px-4 py-2.5 text-right">Total Net</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#1e293b]/60 font-mono">
+                    {summary.payments_by_currency.map((cv: CurrencyVolume) => (
+                      <tr key={cv.currency} className="hover:bg-[#0f172a]">
+                        <td className="px-4 py-3 font-bold text-white">{cv.currency}</td>
+                        <td className="px-4 py-3 text-slate-300 font-sans">{cv.payment_count}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-white">{cv.total_gross}</td>
+                        <td className="px-4 py-3 text-right text-slate-400">{cv.total_fee}</td>
+                        <td className="px-4 py-3 text-right font-bold text-emerald-400">{cv.total_net}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Demo vs Non-Demo Records & Ingestion Health */}
+          <div className="lg:col-span-5 space-y-6">
+            {/* Demo vs Non-Demo Breakdown */}
+            <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-[#1e293b] pb-4">
+                <div className="flex items-center space-x-2">
+                  <ShieldCheck className="w-5 h-5 text-blue-400" />
+                  <h2 className="text-base font-semibold text-white">Record Classification</h2>
+                </div>
+                <span
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                    includeDemo
+                      ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  }`}
+                >
+                  {includeDemo ? "Viewing: All Records" : "Viewing: Uploaded Only"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-[#080d1a] p-3 rounded-xl border border-[#1e293b]">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Demo Deals</span>
+                  <p className="text-lg font-bold text-white mt-1">
+                    {summary?.demo_breakdown.demo_transactions ?? 0}
+                  </p>
+                </div>
+
+                <div className="bg-[#080d1a] p-3 rounded-xl border border-[#1e293b]">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Non-Demo Deals</span>
+                  <p className="text-lg font-bold text-slate-300 mt-1">
+                    {summary?.demo_breakdown.non_demo_transactions ?? 0}
+                  </p>
+                </div>
+
+                <div className="bg-[#080d1a] p-3 rounded-xl border border-[#1e293b]">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Demo Payments</span>
+                  <p className="text-lg font-bold text-white mt-1">
+                    {summary?.demo_breakdown.demo_payments ?? 0}
+                  </p>
+                </div>
+
+                <div className="bg-[#080d1a] p-3 rounded-xl border border-[#1e293b]">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold">Non-Demo Payments</span>
+                  <p className="text-lg font-bold text-slate-300 mt-1">
+                    {summary?.demo_breakdown.non_demo_payments ?? 0}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Document Ingestion Breakdown */}
+            <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center space-x-2 border-b border-[#1e293b] pb-4">
+                <FileCheck className="w-5 h-5 text-indigo-400" />
+                <h2 className="text-base font-semibold text-white">Ingestion Pipeline</h2>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between items-center text-slate-300">
+                  <span>Total Ingested Documents</span>
+                  <span className="font-bold text-white">{totalDocuments}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Extracted & Validated</span>
+                  <span className="text-emerald-400 font-semibold">
+                    {summary?.documents_by_status?.["extracted"] ?? 0}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Pending Review</span>
+                  <span className="text-amber-400 font-semibold">
+                    {summary?.documents_by_status?.["needs_review"] ?? 0}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Parsed & In Processing</span>
+                  <span className="text-indigo-400 font-semibold">
+                    {summary?.documents_by_status?.["parsed"] ?? 0}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Banner */}
-        <section className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-slate-900">
-                System Foundation & Diagnostics
-              </h2>
-              <p className="mt-1 text-sm text-slate-600 max-w-2xl">
-                Phase 0 establishes the monorepo foundation, strict boundary architecture, health probes, and runtime configurations. No business workflows (documents, matching, payments) are active.
-              </p>
-            </div>
-            <div className="hidden sm:block text-right text-xs text-slate-400 font-mono">
-              Target API: {API_BASE}
-            </div>
-          </div>
-        </section>
-
-        {/* Live Diagnostics Grid */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Health Status */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
+        {/* Recent Activity Trend (Dark SVG Chart) */}
+        {summary?.recent_activity && summary.recent_activity.length > 0 && (
+          <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#1e293b] pb-4">
               <div className="flex items-center space-x-2">
-                <Server className="h-5 w-5 text-blue-600" />
-                <h3 className="font-semibold text-slate-900">Backend Liveness (/health)</h3>
+                <TrendingUp className="w-5 h-5 text-blue-400" />
+                <h2 className="text-base font-semibold text-white">Activity Trend</h2>
               </div>
-              {healthLoading ? (
-                <span className="text-xs text-slate-400">Checking...</span>
-              ) : health?.status === "ok" ? (
-                <span className="inline-flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  <CheckCircle2 className="h-3 w-3 mr-1" /> OK
-                </span>
-              ) : (
-                <span className="inline-flex items-center text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                  <AlertCircle className="h-3 w-3 mr-1" /> Unreachable
-                </span>
-              )}
+              <span className="text-xs text-slate-400">Transactions & Payment Captures</span>
             </div>
 
-            <div className="bg-slate-50 rounded-lg p-3 text-xs font-mono space-y-1.5 border border-slate-100">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Service:</span>
-                <span className="text-slate-800">{health?.service ?? (healthLoading ? "..." : "Offline")}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Environment:</span>
-                <span className="text-slate-800">{health?.environment ?? "N/A"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Last Verified:</span>
-                <span className="text-slate-800">{health?.timestamp ? new Date(health.timestamp).toLocaleTimeString() : "N/A"}</span>
-              </div>
-              {healthError && (
-                <div className="pt-2 text-rose-600 text-2xs">
-                  Error: {(healthError as Error).message}. Ensure FastAPI is running on port 8000.
-                </div>
-              )}
+            <div className="h-44 flex items-end space-x-2 pt-6">
+              {summary.recent_activity.slice(-14).map((d: ActivityDataPoint) => {
+                const total = d.payments_captured + d.matches_proposed;
+                const heightPct = Math.min(100, Math.max(12, total * 20));
+                return (
+                  <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group">
+                    <div className="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {total}
+                    </div>
+                    <div
+                      style={{ height: `${heightPct}%` }}
+                      className="w-full rounded-t bg-gradient-to-t from-blue-600 to-indigo-500 group-hover:from-blue-500 group-hover:to-indigo-400 transition-all shadow-md shadow-blue-500/10"
+                    />
+                    <span className="text-[9px] text-slate-500 mt-1 font-mono">
+                      {d.date.slice(5)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
-
-          {/* Readiness Status */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Database className="h-5 w-5 text-indigo-600" />
-                <h3 className="font-semibold text-slate-900">System Readiness (/ready)</h3>
-              </div>
-              {readinessLoading ? (
-                <span className="text-xs text-slate-400">Checking...</span>
-              ) : readiness?.status === "ready" ? (
-                <span className="inline-flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  <CheckCircle2 className="h-3 w-3 mr-1" /> Ready
-                </span>
-              ) : (
-                <span className="inline-flex items-center text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                  <Activity className="h-3 w-3 mr-1" /> Degraded / Standby
-                </span>
-              )}
-            </div>
-
-            <div className="bg-slate-50 rounded-lg p-3 text-xs font-mono space-y-1.5 border border-slate-100">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Database (PostgreSQL):</span>
-                <span className="text-slate-800 font-medium">
-                  {readiness?.database?.status ?? (readinessLoading ? "..." : "Offline")}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Document Storage:</span>
-                <span className="text-slate-800">
-                  {readiness?.storage?.backend ? `${readiness.storage.backend} (${readiness.storage.status})` : "N/A"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">FalkorDB (Secondary):</span>
-                <span className="text-slate-800">{readiness?.secondary_services?.falkordb ?? "N/A"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Chroma (Secondary):</span>
-                <span className="text-slate-800">{readiness?.secondary_services?.chroma ?? "N/A"}</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Architectural Boundaries & Decisions */}
-        <section className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center space-x-2">
-            <ShieldCheck className="h-5 w-5 text-emerald-600" />
-            <h3 className="font-semibold text-slate-900">Confirmed Architectural Boundaries</h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
-              <span className="font-semibold text-slate-800 block">PostgreSQL Authoritative</span>
-              <p>PostgreSQL (Neon) holds source of truth. FalkorDB and Chroma are secondary query layers and never hold authoritative balance or match status.</p>
-            </div>
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
-              <span className="font-semibold text-slate-800 block">FastAPI Domain Authority</span>
-              <p>FastAPI manages all business logic, credentials, and API routes. Next.js App Router serves as the UI client and invokes FastAPI endpoints.</p>
-            </div>
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
-              <span className="font-semibold text-slate-800 block">Strict Data Integrity</span>
-              <p>All financial balances use Decimal/integer minor units. Source provenance is preserved on every extraction, and AI never performs autonomous payouts.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* Future Modules Placeholder */}
-        <section className="border border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50/50">
-          <p className="text-sm font-medium text-slate-700">ProcureMind Workflows (Upcoming Phases)</p>
-          <p className="text-xs text-slate-500 mt-1 max-w-lg mx-auto">
-            Document extraction, Purchase Order / Invoice three-way matching, discrepancy resolution, and PayPal sandbox integrations will be introduced incrementally in subsequent phases.
-          </p>
-        </section>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        ProcureMind Architecture Monorepo &bull; Phase 0 Foundation Complete
-      </footer>
-    </div>
+        )}
+      </div>
+    </AppShell>
   );
 }
-
