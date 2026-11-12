@@ -100,3 +100,4 @@ def downgrade() -> None:
     op.drop_index("ix_documents_source_external_id", table_name="documents")
     op.drop_column("documents", "source_external_id")
     op.drop_column("documents", "source_system")
+
