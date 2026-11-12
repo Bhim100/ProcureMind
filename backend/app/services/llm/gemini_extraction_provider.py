@@ -1,5 +1,6 @@
 """Google Gemini provider implementation for structured document extraction."""
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -60,26 +61,51 @@ class GeminiExtractionProvider(StructuredExtractionProviderInterface):
             },
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                response = await client.post(
-                    endpoint_url,
-                    json=request_body,
-                    headers={"Content-Type": "application/json"},
-                )
-        except httpx.TimeoutException as exc:
-            logger.error("Gemini extraction request timed out")
-            raise ExtractionProviderError("Extraction provider timed out", status_code=504) from exc
-        except httpx.RequestError as exc:
-            logger.error(f"Gemini extraction network failure: {type(exc).__name__}")
-            raise ExtractionProviderError(
-                "Network failure connecting to extraction provider", status_code=502
-            ) from exc
+        candidate_models = [self.model]
+        for fallback in ["gemini-3.1-flash-lite", "gemini-3.8-flash"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
 
-        if response.status_code != 200:
-            logger.error(f"Gemini API returned HTTP {response.status_code}")
+        last_error_status = 502
+        response = None
+
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            for model_to_use in candidate_models:
+                endpoint_url = (
+                    f"{self.base_url}/models/{model_to_use}:generateContent?key={self.api_key}"
+                )
+                try:
+                    response = await client.post(
+                        endpoint_url,
+                        json=request_body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                except httpx.TimeoutException:
+                    logger.warning(f"Gemini model {model_to_use} timed out; checking fallback")
+                    continue
+                except httpx.RequestError as exc:
+                    logger.warning(
+                        f"Gemini model {model_to_use} network error: {type(exc).__name__}"
+                    )
+                    continue
+
+                if response.status_code == 200:
+                    break
+                elif response.status_code in (503, 429):
+                    logger.warning(
+                        f"Gemini model {model_to_use} returned {response.status_code} (overloaded/rate-limited). Trying fallback model."
+                    )
+                    last_error_status = response.status_code
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.error(f"Gemini API returned HTTP {response.status_code}")
+                    last_error_status = response.status_code
+                    break
+
+        if response is None or response.status_code != 200:
+            logger.error(f"All Gemini extraction attempts failed (last status {last_error_status})")
             raise ExtractionProviderError(
-                f"Extraction provider returned error status {response.status_code}",
+                f"Extraction provider returned error status {last_error_status}",
                 status_code=502,
             )
 
