@@ -27,7 +27,7 @@ except ImportError:
 try:
     import pdfplumber  # type: ignore[import-untyped,import-not-found]
 except ImportError:
-    pdfplumber = None
+    pdfplumber = None  # type: ignore[assignment]
 
 
 def parse_pdf(
@@ -69,7 +69,7 @@ def parse_pdf(
     if pdfplumber is not None:
         try:
             plumber_doc = pdfplumber.open(io.BytesIO(file_bytes))
-        except (ValueError, TypeError, OSError) as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning(
                 f"pdfplumber failed to open PDF; proceeding without table extraction: {exc}"
             )

@@ -100,6 +100,11 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="document",
         foreign_keys="EvidenceReference.document_id",
     )
+    field_audit_logs: Mapped[list["FieldAuditLog"]] = relationship(
+        "FieldAuditLog",
+        back_populates="document",
+        foreign_keys="FieldAuditLog.document_id",
+    )
 
 
 class ExtractedField(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -186,5 +191,93 @@ class ExtractedField(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="extracted_field",
         foreign_keys="EvidenceReference.extracted_field_id",
     )
+    field_audit_logs: Mapped[list["FieldAuditLog"]] = relationship(
+        "FieldAuditLog",
+        back_populates="extracted_field",
+        foreign_keys="FieldAuditLog.extracted_field_id",
+    )
 
     __table_args__ = (Index("ix_extracted_fields_doc_name", "document_id", "field_name"),)
+
+
+class FieldAuditLog(Base, UUIDPrimaryKeyMixin):
+    """
+    Immutable audit trail recording all human corrections to extracted document fields.
+
+    Retains full before-and-after values along with permanent snapshot identifiers.
+    Foreign keys have ondelete='SET NULL' so audit logs are never cascade-deleted
+    if an extracted field or document is deleted or re-extracted.
+    """
+
+    __tablename__ = "field_audit_logs"
+
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Source document foreign key (nullable if document is archived/deleted)",
+    )
+    extracted_field_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("extracted_fields.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Target extracted field foreign key (nullable if field is deleted)",
+    )
+    document_id_snapshot: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        nullable=False,
+        index=True,
+        comment="Permanent immutable snapshot of the source document UUID",
+    )
+    extracted_field_id_snapshot: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        nullable=False,
+        index=True,
+        comment="Permanent immutable snapshot of the extracted field UUID",
+    )
+    field_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Name of the corrected field",
+    )
+    old_normalized_value: Mapped[Any | None] = mapped_column(
+        JSON_VARIANT,
+        nullable=True,
+        comment="Previous normalized value before correction",
+    )
+    new_normalized_value: Mapped[Any | None] = mapped_column(
+        JSON_VARIANT,
+        nullable=True,
+        comment="New corrected normalized value",
+    )
+    reviewer_label: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Auditor identity or label who performed the correction",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Optional auditor justification notes",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+        comment="UTC timestamp when the field correction was recorded",
+    )
+
+    # Relationships
+    document: Mapped["Document | None"] = relationship(
+        "Document",
+        back_populates="field_audit_logs",
+        foreign_keys=[document_id],
+    )
+    extracted_field: Mapped["ExtractedField | None"] = relationship(
+        "ExtractedField",
+        back_populates="field_audit_logs",
+        foreign_keys=[extracted_field_id],
+    )

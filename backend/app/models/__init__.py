@@ -6,7 +6,7 @@ authoritative PostgreSQL database.
 """
 
 from app.models.base import GUID, JSON_VARIANT, Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.document import Document, ExtractedField
+from app.models.document import Document, ExtractedField, FieldAuditLog
 from app.models.enums import (
     AllocationMethod,
     AllocationReviewStatus,
@@ -67,6 +67,7 @@ __all__ = [
     "ExportTransaction",
     "ExtractedField",
     "ExtractionMethod",
+    "FieldAuditLog",
     "HumanDecision",
     "Invoice",
     "InvoiceLineItem",

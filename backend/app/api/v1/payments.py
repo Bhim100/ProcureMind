@@ -324,9 +324,15 @@ def list_payments(
     ),
     invoice_id: uuid.UUID | None = Query(None, description="Filter by invoice ID"),
     status: PaymentStatus | None = Query(None, description="Filter by payment status"),
+    environment: EnvironmentLabel | None = Query(
+        None, description="Filter by environment (sandbox, production)"
+    ),
+    is_demo: bool | None = Query(None, description="Filter by demo status"),
+    limit: int = Query(50, ge=1, le=100, description="Page size limit"),
+    offset: int = Query(0, ge=0, description="Page offset"),
     db: Session = Depends(get_db),
 ) -> list[PaymentRead]:
-    """Returns payments matching specified criteria."""
+    """Returns payments matching specified criteria with pagination."""
     query = db.query(Payment)
     if export_transaction_id:
         query = query.filter(Payment.export_transaction_id == export_transaction_id)
@@ -334,6 +340,10 @@ def list_payments(
         query = query.filter(Payment.invoice_id == invoice_id)
     if status:
         query = query.filter(Payment.status == status)
+    if environment:
+        query = query.filter(Payment.environment == environment)
+    if is_demo is not None:
+        query = query.filter(Payment.is_demo == is_demo)
 
-    payments = query.order_by(Payment.created_at.desc()).all()
+    payments = query.order_by(Payment.created_at.desc()).offset(offset).limit(limit).all()
     return [PaymentRead.model_validate(p) for p in payments]

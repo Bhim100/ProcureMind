@@ -3,11 +3,11 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.api.deps import verify_auditor_key
 from app.core.database import get_db
 from app.models.enums import AllocationReviewStatus, TargetType
 from app.models.export import Invoice
@@ -43,22 +43,114 @@ class InvoiceDetailResponse(InvoiceRead):
     remaining_balance: str
 
 
-def verify_auditor_key(x_auditor_key: str | None = Header(None, alias="X-Auditor-Key")) -> str:
+class PaginatedInvoiceListResponse(BaseModel):
+    """Paginated collection of commercial export invoices."""
+
+    items: list[InvoiceDetailResponse]
+    total_count: int
+    limit: int
+    offset: int
+
+
+@router.get(
+    "",
+    response_model=PaginatedInvoiceListResponse,
+    summary="List commercial export invoices with approval status and remaining balances",
+)
+def list_invoices(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    approval_status: str | None = Query(
+        None, description="Filter by: all, approved, pending_approval"
+    ),
+    is_demo: bool | None = Query(None, description="Filter demo records"),
+    search: str | None = Query(None, description="Search by invoice number or buyer name"),
+    db: Session = Depends(get_db),
+) -> PaginatedInvoiceListResponse:
     """
-    Security dependency verifying the presence and validity of the server's configured AUDITOR_API_KEY.
-    Fails closed if the secret is unconfigured or mismatched.
+    Returns commercial invoices with authoritative PostgreSQL-calculated balances and approval states.
     """
-    if not settings.AUDITOR_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Auditor authorization key is unconfigured on server. Approvals are disabled until AUDITOR_API_KEY is configured.",
+    query = db.query(Invoice)
+
+    if is_demo is not None:
+        query = query.filter(Invoice.is_demo == is_demo)
+
+    if search:
+        search_pattern = f"%{search.strip()}%"
+        query = query.filter(
+            (Invoice.invoice_number.ilike(search_pattern))
+            | (Invoice.buyer_name.ilike(search_pattern))
         )
-    if not x_auditor_key or x_auditor_key != settings.AUDITOR_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing auditor authorization key (X-Auditor-Key header required).",
+
+    # Approved IDs query for filtering
+    approved_subquery = (
+        db.query(HumanDecision.target_id)
+        .filter(
+            HumanDecision.target_type == TargetType.INVOICE,
+            HumanDecision.decision == "approved",
         )
-    return x_auditor_key
+        .distinct()
+    )
+
+    if approval_status == "approved":
+        query = query.filter(Invoice.id.in_(approved_subquery))
+    elif approval_status == "pending_approval":
+        query = query.filter(~Invoice.id.in_(approved_subquery))
+
+    total_count = query.count()
+    invoices = query.order_by(Invoice.issue_date.desc()).offset(offset).limit(limit).all()
+
+    items: list[InvoiceDetailResponse] = []
+    for invoice in invoices:
+        approval = (
+            db.query(HumanDecision)
+            .filter(
+                HumanDecision.target_type == TargetType.INVOICE,
+                HumanDecision.target_id == invoice.id,
+                HumanDecision.decision == "approved",
+            )
+            .order_by(HumanDecision.decided_at.desc())
+            .first()
+        )
+
+        approved_allocs = (
+            db.query(Allocation)
+            .filter(
+                Allocation.invoice_id == invoice.id,
+                Allocation.review_status == AllocationReviewStatus.APPROVED,
+            )
+            .all()
+        )
+        total_credit = sum(
+            (a.allocated_amount for a in approved_allocs if not a.is_reversal),
+            invoice.total_amount * 0,
+        )
+        total_reversal = sum(
+            (a.allocated_amount for a in approved_allocs if a.is_reversal),
+            invoice.total_amount * 0,
+        )
+        rem_balance = invoice.total_amount - (total_credit - total_reversal)
+
+        invoice_data = InvoiceRead.model_validate(invoice).model_dump()
+        invoice_data["is_approved"] = approval is not None
+        invoice_data["approval_details"] = (
+            {
+                "reviewer_label": approval.reviewer_label,
+                "decided_at": approval.decided_at.isoformat(),
+                "notes": approval.notes or "",
+            }
+            if approval
+            else None
+        )
+        invoice_data["remaining_balance"] = f"{rem_balance:.2f}"
+        items.append(InvoiceDetailResponse(**invoice_data))
+
+    return PaginatedInvoiceListResponse(
+        items=items,
+        total_count=total_count,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(
@@ -159,5 +251,5 @@ def get_invoice_detail(
         if approval
         else None
     )
-    invoice_data["remaining_balance"] = str(rem_balance)
+    invoice_data["remaining_balance"] = f"{rem_balance:.2f}"
     return InvoiceDetailResponse(**invoice_data)

@@ -356,7 +356,8 @@ async def extract_document(
         # 5. Build source index and prepare prompt
         source_index = build_source_index(parsed_doc)
 
-        prompt_file = f"{document_kind.value}_v1.md"
+        kind_str = document_kind.value if hasattr(document_kind, "value") else str(document_kind)
+        prompt_file = f"{kind_str}_v1.md"
         prompt_path = (
             Path(__file__).resolve().parent.parent / "extraction" / "prompts" / prompt_file
         )

@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.deps import verify_auditor_key
 from app.core.database import get_db
 from app.schemas.match import MatchDecisionRequest, ReconciliationMatchRead
 from app.services.reconciliation_engine import apply_match_decision
@@ -20,6 +21,7 @@ router = APIRouter()
 def decide_match(
     id: uuid.UUID,
     payload: MatchDecisionRequest,
+    _auth: str = Depends(verify_auditor_key),
     db: Session = Depends(get_db),
 ) -> ReconciliationMatchRead:
     """

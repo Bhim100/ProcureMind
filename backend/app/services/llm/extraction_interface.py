@@ -36,4 +36,3 @@ class StructuredExtractionProviderInterface(ABC):
             dict[str, Any]: Unvalidated JSON response dictionary from the model.
         """
         raise NotImplementedError
-

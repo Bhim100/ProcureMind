@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.currencies import validate_currency_code, validate_currency_scale
 from app.models.enums import (
     AllocationReviewStatus,
@@ -139,6 +140,7 @@ def test_exact_match_single_allocation(client_with_db: TestClient, db_session: S
     # 2. Approve match via decision endpoint
     dec_res = client_with_db.post(
         f"/api/v1/matches/{match_row['id']}/decision",
+        headers={"X-Auditor-Key": settings.AUDITOR_API_KEY},
         json={
             "decision": "approved",
             "reviewer_label": "lead_auditor",
@@ -318,7 +320,12 @@ def test_consolidated_settlement_suggestions_only_lifecycle(
     for m in inv_matches:
         client_with_db.post(
             f"/api/v1/matches/{m['id']}/decision",
-            json={"decision": "approved", "reviewer_label": "batch_reviewer"},
+            headers={"X-Auditor-Key": settings.AUDITOR_API_KEY},
+            json={
+                "decision": "approved",
+                "reviewer_label": "batch_reviewer",
+                "notes": "Approved batch match",
+            },
         )
 
     # Now official allocations total $10,000 (never $29,400)
@@ -390,6 +397,7 @@ def test_refund_compensating_reversal(client_with_db: TestClient, db_session: Se
     # Approve reversal
     dec_res = client_with_db.post(
         f"/api/v1/matches/{reversal_match['id']}/decision",
+        headers={"X-Auditor-Key": settings.AUDITOR_API_KEY},
         json={
             "decision": "approved",
             "reviewer_label": "dispute_officer",

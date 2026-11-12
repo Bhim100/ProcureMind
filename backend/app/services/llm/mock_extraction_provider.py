@@ -66,4 +66,3 @@ class MockExtractionProvider(StructuredExtractionProviderInterface):
 
         # Default fallback minimal empty extraction response
         return {}
-

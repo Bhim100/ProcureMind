@@ -15,7 +15,7 @@ try:
     from PIL import Image  # type: ignore[import-untyped,import-not-found]
 except ImportError:
     pytesseract = None
-    Image = None
+    Image = None  # type: ignore[assignment]
 
 
 def perform_ocr(

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 try:
     from PIL import Image  # type: ignore[import-untyped,import-not-found]
 except ImportError:
-    Image = None
+    Image = None  # type: ignore[assignment]
 
 
 def parse_image(

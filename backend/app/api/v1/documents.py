@@ -15,12 +15,25 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import verify_auditor_key
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.document import Document
-from app.models.enums import ProcessingStatus
-from app.schemas.document import DocumentRead, DocumentUploadResponse, DownloadUrlResponse
-from app.schemas.extraction import DocumentExtractionRequest, DocumentExtractionResponse
+from app.models.document import Document, ExtractedField, FieldAuditLog
+from app.models.enums import ExtractionMethod, ProcessingStatus, ReviewState
+from app.schemas.document import (
+    DocumentRead,
+    DocumentUploadResponse,
+    DownloadUrlResponse,
+    ExtractedFieldRead,
+    PreviewUrlResponse,
+)
+from app.schemas.extraction import (
+    DocumentExtractionRequest,
+    DocumentExtractionResponse,
+    ExtractedFieldCorrectionResponse,
+    FieldAuditLogRead,
+    FieldCorrectionRequest,
+)
 from app.schemas.parser import ParsedDocument
 from app.services.document_service import (
     compute_sha256,
@@ -226,6 +239,90 @@ def download_document(
     )
 
 
+@router.get(
+    "/{document_id}/preview-url",
+    response_model=PreviewUrlResponse,
+    summary="Generate short-lived signed preview URL",
+)
+def get_document_preview_url(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> PreviewUrlResponse:
+    """
+    Generates a temporary signed preview link for an authorized document.
+    Link expires after configured duration (default: 300 seconds).
+    """
+    doc = db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with ID '{document_id}' not found",
+        )
+
+    duration = settings.DOWNLOAD_URL_EXPIRES_SECONDS
+    expires_at = datetime.now(UTC) + timedelta(seconds=duration)
+    expires_ts = int(expires_at.timestamp())
+
+    token = create_download_token(doc.id, expires_ts)
+    preview_url = (
+        f"{settings.API_V1_STR}/documents/{doc.id}/preview?expires={expires_ts}&token={token}"
+    )
+
+    return PreviewUrlResponse(
+        preview_url=preview_url,
+        expires_in_seconds=duration,
+        expires_at=expires_at,
+    )
+
+
+@router.get(
+    "/{document_id}/preview",
+    summary="Preview document inline using signed token",
+)
+def preview_document(
+    document_id: uuid.UUID,
+    expires: int = Query(..., description="UTC expiration timestamp"),
+    token: str = Query(..., description="HMAC-SHA256 authorization token"),
+    db: Session = Depends(get_db),
+) -> Response:
+    """
+    Validates short-lived signed token in constant time, looks up document storage key,
+    and returns content with Content-Disposition: inline and security headers for safe sandboxed iframe rendering.
+    """
+    if not verify_download_token(document_id, expires, token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Preview link is invalid or has expired",
+        )
+
+    doc = db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with ID '{document_id}' not found",
+        )
+
+    storage = get_storage_service()
+    try:
+        content = storage.get_file(doc.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document file data not found in storage",
+        ) from exc
+
+    return Response(
+        content=content,
+        media_type=doc.media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{doc.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox allow-scripts",
+            "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        },
+    )
+
+
 @router.post(
     "/{document_id}/parse",
     response_model=ParsedDocument,
@@ -268,3 +365,117 @@ async def extract_document_endpoint(
         document_kind=payload.document_kind,
         provider=provider,
     )
+
+
+@router.get(
+    "/{document_id}/fields",
+    response_model=list[ExtractedFieldRead],
+    summary="List all extracted fields for a document with bounding boxes and review states",
+)
+def list_document_fields(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> list[ExtractedFieldRead]:
+    """Retrieves all extracted fields belonging to a document ordered by page and location."""
+    doc = db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with ID '{document_id}' not found",
+        )
+
+    fields = (
+        db.query(ExtractedField)
+        .filter(ExtractedField.document_id == document_id)
+        .order_by(ExtractedField.page_number.asc().nullsfirst(), ExtractedField.field_name.asc())
+        .all()
+    )
+    return [ExtractedFieldRead.model_validate(f) for f in fields]
+
+
+@router.patch(
+    "/{document_id}/fields/{field_id}",
+    response_model=ExtractedFieldCorrectionResponse,
+    summary="Auditor correction of an extracted field value with immutable audit logging",
+)
+def correct_extracted_field(
+    document_id: uuid.UUID,
+    field_id: uuid.UUID,
+    payload: FieldCorrectionRequest,
+    _auth: str = Depends(verify_auditor_key),
+    db: Session = Depends(get_db),
+) -> ExtractedFieldCorrectionResponse:
+    """
+    Applies an auditor manual correction to an extracted field:
+    - Retains original raw_value as immutable source text.
+    - Updates normalized_value to the auditor's corrected input.
+    - Sets extraction_method to 'manual' and review_state to 'human_verified'.
+    - Stamped with reviewer_label and UTC timestamp.
+    - Creates an append-only FieldAuditLog entry preserving full before/after values and snapshot IDs.
+    """
+    field = (
+        db.query(ExtractedField)
+        .filter(
+            ExtractedField.id == field_id,
+            ExtractedField.document_id == document_id,
+        )
+        .first()
+    )
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Extracted field '{field_id}' not found on document '{document_id}'",
+        )
+
+    now_utc = datetime.now(UTC)
+    old_val = field.normalized_value
+
+    audit_entry = FieldAuditLog(
+        id=uuid.uuid4(),
+        document_id=field.document_id,
+        extracted_field_id=field.id,
+        document_id_snapshot=field.document_id,
+        extracted_field_id_snapshot=field.id,
+        field_name=field.field_name,
+        old_normalized_value=old_val,
+        new_normalized_value=payload.new_normalized_value,
+        reviewer_label=payload.reviewer_label,
+        notes=payload.notes,
+        created_at=now_utc,
+    )
+    db.add(audit_entry)
+
+    field.normalized_value = payload.new_normalized_value
+    field.extraction_method = ExtractionMethod.MANUAL
+    field.review_state = ReviewState.HUMAN_VERIFIED
+    field.reviewed_by = payload.reviewer_label
+    field.reviewed_at = now_utc
+
+    db.commit()
+    db.refresh(field)
+    db.refresh(audit_entry)
+
+    return ExtractedFieldCorrectionResponse(
+        field=ExtractedFieldRead.model_validate(field),
+        audit_log=FieldAuditLogRead.model_validate(audit_entry),
+    )
+
+
+@router.get(
+    "/{document_id}/fields/{field_id}/audit-trail",
+    response_model=list[FieldAuditLogRead],
+    summary="Get permanent audit history of corrections for an extracted field",
+)
+def get_field_audit_trail(
+    document_id: uuid.UUID,
+    field_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> list[FieldAuditLogRead]:
+    """Returns all audit log records for the field, ordered chronologically."""
+    logs = (
+        db.query(FieldAuditLog)
+        .filter(FieldAuditLog.extracted_field_id_snapshot == field_id)
+        .order_by(FieldAuditLog.created_at.asc())
+        .all()
+    )
+    return [FieldAuditLogRead.model_validate(log) for log in logs]

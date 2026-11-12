@@ -32,7 +32,9 @@ class MatchDecisionRequest(ProcureMindBaseSchema):
 
     decision: DecisionType
     reviewer_label: str = Field(..., min_length=2, max_length=100)
-    notes: str | None = None
+    notes: str = Field(
+        ..., min_length=3, max_length=1000, description="Mandatory auditor justification note"
+    )
 
     @field_validator("decision")
     @classmethod
@@ -42,6 +44,16 @@ class MatchDecisionRequest(ProcureMindBaseSchema):
                 f"Invalid decision '{v}'. Matches can only be confirmed as 'approved' or 'rejected'."
             )
         return v
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes_not_blank(cls, v: str) -> str:
+        cleaned = v.strip()
+        if len(cleaned) < 3:
+            raise ValueError(
+                "Audit notes/comments are required and cannot be blank or whitespace-only."
+            )
+        return cleaned
 
 
 class ReconciliationMatchRead(ProcureMindBaseSchema):

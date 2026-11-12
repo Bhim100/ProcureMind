@@ -82,6 +82,21 @@ class DownloadUrlResponse(ProcureMindBaseSchema):
         return ensure_utc_datetime(v)
 
 
+class PreviewUrlResponse(ProcureMindBaseSchema):
+    """API response containing a short-lived inline preview link."""
+
+    preview_url: str = Field(
+        ..., description="Short-lived signed URL for previewing document inline"
+    )
+    expires_in_seconds: int = Field(..., description="Duration in seconds before token expires")
+    expires_at: datetime = Field(..., description="Exact UTC timestamp when preview link expires")
+
+    @field_validator("expires_at", mode="after")
+    @classmethod
+    def ensure_utc(cls, v: datetime) -> datetime:
+        return ensure_utc_datetime(v)
+
+
 class ExtractedFieldBase(ProcureMindBaseSchema):
     field_name: str = Field(..., max_length=100)
     raw_value: str | None = None
