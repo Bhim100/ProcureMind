@@ -104,6 +104,12 @@ from app.schemas.transaction import (
     ShippingBillWithLinkStatus,
     TransactionDetailRead,
 )
+from app.schemas.zoho import (
+    ZohoAuthUrlResponse,
+    ZohoInvoiceItem,
+    ZohoStatusResponse,
+    ZohoSyncResult,
+)
 
 __all__ = [
     # Reconciliation
@@ -196,4 +202,8 @@ __all__ = [
     "TransactionLinkCreate",
     "TransactionLinkRead",
     "UnlinkedRecordReport",
+    "ZohoAuthUrlResponse",
+    "ZohoInvoiceItem",
+    "ZohoStatusResponse",
+    "ZohoSyncResult",
 ]

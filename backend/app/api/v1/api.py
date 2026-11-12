@@ -12,6 +12,7 @@ from app.api.v1 import (
     reconciliation_queue,
     transactions,
     webhooks,
+    zoho,
 )
 
 api_router = APIRouter()
@@ -26,3 +27,4 @@ api_router.include_router(invoices.router, prefix="/invoices", tags=["invoices"]
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(zoho.router)

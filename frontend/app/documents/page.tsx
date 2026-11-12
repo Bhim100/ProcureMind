@@ -345,7 +345,14 @@ export default function DocumentsPage() {
                         <div className="flex items-center space-x-3">
                           {getFileIcon(doc.media_type)}
                           <div>
-                            <p className="font-semibold text-slate-100 text-xs">{doc.original_filename}</p>
+                            <div className="flex items-center space-x-1.5">
+                              <p className="font-semibold text-slate-100 text-xs">{doc.original_filename}</p>
+                              {doc.source_system === "zoho_books" && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/30">
+                                  Zoho Books
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[11px] text-slate-500">{doc.media_type}</p>
                           </div>
                         </div>

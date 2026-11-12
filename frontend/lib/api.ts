@@ -16,6 +16,8 @@ export interface DocumentRead {
   processing_status: "uploaded" | "parsed" | "extracted" | "needs_review" | "approved" | "rejected";
   page_count?: number | null;
   is_demo: boolean;
+  source_system?: string;
+  source_external_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -637,5 +639,84 @@ export interface HealthResponse {
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${API_BASE}/api/v1/health`);
   if (!res.ok) throw new Error(`Health check failed: HTTP ${res.status}`);
+  return res.json();
+}
+
+// --- Zoho Books Integration API ---
+
+export interface ZohoStatusResponse {
+  is_connected: boolean;
+  organization_id: string | null;
+  organization_name: string | null;
+  api_domain: string;
+  last_sync_at: string | null;
+  synced_documents_count: number;
+  total_synced_amount: string | number;
+  currency: string;
+  has_oauth_config: boolean;
+}
+
+export interface ZohoAuthUrlResponse {
+  auth_url: string;
+  configured: boolean;
+}
+
+export interface ZohoInvoiceItem {
+  document_id: string;
+  invoice_number: string;
+  filename: string;
+  total_amount: string | number;
+  currency: string;
+  status: string;
+  source_external_id: string;
+}
+
+export interface ZohoSyncResult {
+  synced_count: number;
+  skipped_duplicate_count: number;
+  failed_count: number;
+  invoices: ZohoInvoiceItem[];
+  message: string;
+}
+
+export async function getZohoStatus(): Promise<ZohoStatusResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/integrations/zoho/status`);
+  if (!res.ok) throw new Error(`Failed to fetch Zoho status: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function getZohoAuthUrl(): Promise<ZohoAuthUrlResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/integrations/zoho/auth-url`);
+  if (!res.ok) throw new Error(`Failed to fetch Zoho auth URL: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function syncZohoInvoices(limit = 10): Promise<ZohoSyncResult> {
+  const res = await fetch(`${API_BASE}/api/v1/integrations/zoho/sync?limit=${limit}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Zoho sync failed: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function simulateZohoSync(count = 1): Promise<ZohoSyncResult> {
+  const res = await fetch(`${API_BASE}/api/v1/integrations/zoho/simulate-sync?count=${count}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Zoho simulation failed: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function disconnectZoho(): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/api/v1/integrations/zoho/disconnect`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to disconnect Zoho: HTTP ${res.status}`);
   return res.json();
 }

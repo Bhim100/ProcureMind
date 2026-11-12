@@ -30,6 +30,7 @@ from app.models.enums import (
     TransactionStatus,
 )
 from app.models.export import ExportTransaction, Invoice, InvoiceLineItem, ShippingBill
+from app.models.integration import ZohoIntegration
 from app.models.payment import BankTransaction, Payment, ProviderWebhookEvent, Settlement
 from app.models.reconciliation import (
     Allocation,
@@ -90,4 +91,5 @@ __all__ = [
     "TransactionLink",
     "TransactionStatus",
     "UUIDPrimaryKeyMixin",
+    "ZohoIntegration",
 ]

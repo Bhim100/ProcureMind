@@ -27,6 +27,12 @@ class DocumentBase(ProcureMindBaseSchema):
     processing_status: ProcessingStatus = ProcessingStatus.UPLOADED
     page_count: int | None = Field(None, ge=1)
     is_demo: bool = False
+    source_system: str = Field(
+        default="manual_upload", max_length=50, description="Ingestion origin system"
+    )
+    source_external_id: str | None = Field(
+        default=None, max_length=100, description="External ID in source system"
+    )
 
     @field_validator("sha256")
     @classmethod

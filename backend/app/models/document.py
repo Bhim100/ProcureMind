@@ -88,6 +88,18 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
         comment="Flag indicating if this document is seeded synthetic demo data",
     )
+    source_system: Mapped[str] = mapped_column(
+        String(50),
+        default="manual_upload",
+        nullable=False,
+        comment="Ingestion origin (e.g. manual_upload, zoho_books, email_ingest)",
+    )
+    source_external_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="External record identifier in source system (e.g. Zoho invoice_id)",
+    )
 
     # Relationships
     extracted_fields: Mapped[list["ExtractedField"]] = relationship(

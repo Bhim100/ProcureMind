@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str | None = None
     LLM_TIMEOUT_SECONDS: int = 15
 
+    # Phase 12: Zoho Books Integration Configuration
+    ZOHO_CLIENT_ID: str = ""
+    ZOHO_CLIENT_SECRET: str = ""
+    ZOHO_REDIRECT_URI: str = "http://localhost:3000/integrations/zoho"
+    ZOHO_ACCOUNTS_URL: str = "https://accounts.zoho.com"
+    ZOHO_BOOKS_API_DOMAIN: str = "https://books.zoho.com"
+
     # Phase 7: Document Text Extraction & OCR Fallback Configuration
     OCR_TESSERACT_CMD: str | None = None
     PARSER_MAX_PAGES: int = 50
