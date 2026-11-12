@@ -24,7 +24,9 @@ import {
 import { useDemoFilter } from "@/lib/demo-filter-context";
 
 interface DocumentDiffViewProps {
-  baseDocumentId: string;
+  initialBaseDocumentId?: string;
+  initialTargetDocumentId?: string;
+  baseDocumentId?: string;
   baseDocumentName?: string;
   baseDocumentType?: string;
 }
@@ -43,12 +45,19 @@ interface FieldComparisonItem {
 }
 
 export default function DocumentDiffView({
+  initialBaseDocumentId,
+  initialTargetDocumentId,
   baseDocumentId,
-  baseDocumentName = "Current Document",
-  baseDocumentType = "Document",
+  baseDocumentName,
+  baseDocumentType,
 }: DocumentDiffViewProps) {
   const { includeDemo } = useDemoFilter();
-  const [targetDocId, setTargetDocId] = useState<string>("");
+  const [selectedBaseDocId, setSelectedBaseDocId] = useState<string>(
+    baseDocumentId || initialBaseDocumentId || ""
+  );
+  const [selectedTargetDocId, setSelectedTargetDocId] = useState<string>(
+    initialTargetDocumentId || ""
+  );
   const [filterMode, setFilterMode] = useState<"all" | "variances" | "line_items" | "matches">("all");
   const [auditAcknowledged, setAuditAcknowledged] = useState<boolean>(false);
 
@@ -58,17 +67,31 @@ export default function DocumentDiffView({
     queryFn: () => getDocuments({ is_demo: includeDemo ? undefined : false }),
   });
 
-  const availableTargetDocs = useMemo(
-    () => allDocs.filter((d) => d.id !== baseDocumentId),
-    [allDocs, baseDocumentId]
+  // Auto-select Base Document if none set
+  React.useEffect(() => {
+    if (allDocs.length > 0 && !selectedBaseDocId) {
+      // Default to commercial invoice if present, else first doc
+      const comm = allDocs.find((d) => d.original_filename.toLowerCase().includes("commercial"));
+      setSelectedBaseDocId(comm ? comm.id : allDocs[0].id);
+    }
+  }, [allDocs, selectedBaseDocId]);
+
+  const activeBaseDoc = useMemo(
+    () => allDocs.find((d) => d.id === selectedBaseDocId),
+    [allDocs, selectedBaseDocId]
   );
 
-  // Auto-select related document if none chosen
+  const availableTargetDocs = useMemo(
+    () => allDocs.filter((d) => d.id !== selectedBaseDocId),
+    [allDocs, selectedBaseDocId]
+  );
+
+  // Auto-select Target Document if none chosen
   React.useEffect(() => {
-    if (availableTargetDocs.length > 0 && !targetDocId) {
-      // Intelligently find related counterpart (e.g. proforma if base is commercial, or packing list)
-      const isBaseCommercial = baseDocumentName.toLowerCase().includes("commercial");
-      const isBaseProforma = baseDocumentName.toLowerCase().includes("proforma");
+    if (availableTargetDocs.length > 0 && (!selectedTargetDocId || selectedTargetDocId === selectedBaseDocId)) {
+      const baseName = (activeBaseDoc?.original_filename || baseDocumentName || "").toLowerCase();
+      const isBaseCommercial = baseName.includes("commercial");
+      const isBaseProforma = baseName.includes("proforma");
 
       let autoPick = availableTargetDocs[0];
       if (isBaseCommercial) {
@@ -82,26 +105,27 @@ export default function DocumentDiffView({
         );
         if (commercial) autoPick = commercial;
       }
-      setTargetDocId(autoPick.id);
+      setSelectedTargetDocId(autoPick.id);
     }
-  }, [availableTargetDocs, targetDocId, baseDocumentName]);
+  }, [availableTargetDocs, selectedTargetDocId, selectedBaseDocId, activeBaseDoc, baseDocumentName]);
 
   const activeTargetDoc = useMemo(
-    () => allDocs.find((d) => d.id === targetDocId),
-    [allDocs, targetDocId]
+    () => allDocs.find((d) => d.id === selectedTargetDocId),
+    [allDocs, selectedTargetDocId]
   );
 
   // 2. Fetch fields of base document
   const { data: baseFields = [], isLoading: isBaseLoading } = useQuery<ExtractedFieldRead[]>({
-    queryKey: ["document-fields", baseDocumentId],
-    queryFn: () => getDocumentFields(baseDocumentId),
+    queryKey: ["document-fields", selectedBaseDocId],
+    queryFn: () => getDocumentFields(selectedBaseDocId),
+    enabled: !!selectedBaseDocId,
   });
 
   // 3. Fetch fields of target document
   const { data: targetFields = [], isLoading: isTargetLoading } = useQuery<ExtractedFieldRead[]>({
-    queryKey: ["document-fields", targetDocId],
-    queryFn: () => getDocumentFields(targetDocId),
-    enabled: !!targetDocId,
+    queryKey: ["document-fields", selectedTargetDocId],
+    queryFn: () => getDocumentFields(selectedTargetDocId),
+    enabled: !!selectedTargetDocId,
   });
 
   // 4. Compute Side-by-Side Diff
@@ -292,42 +316,59 @@ export default function DocumentDiffView({
     <div className="space-y-6">
       {/* Comparison Selector Bar */}
       <div className="bg-[#0c1322] border border-[#1e293b] rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Left: Base Document Info */}
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
-            <FileText className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
+        {/* Left: Document A (Base) */}
+        <div className="flex-1 md:max-w-md">
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              Document A (Base):
+            </label>
+            {activeBaseDoc && (
               <span className="text-[10px] uppercase font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
-                Primary (This Document)
+                {activeBaseDoc.document_type.replace("_", " ")}
               </span>
-              <span className="text-[11px] text-slate-400 capitalize">{baseDocumentType.replace("_", " ")}</span>
-            </div>
-            <h3 className="text-sm font-bold text-white mt-0.5 font-mono">{baseDocumentName}</h3>
+            )}
           </div>
+          <select
+            value={selectedBaseDocId}
+            onChange={(e) => setSelectedBaseDocId(e.target.value)}
+            disabled={allDocs.length === 0}
+            className="w-full px-3 py-2 rounded-xl bg-[#080d1a] border border-[#1e293b] text-white text-xs font-medium focus:outline-none focus:border-blue-500 disabled:opacity-50"
+          >
+            {allDocs.map((doc) => (
+              <option key={doc.id} value={doc.id}>
+                {doc.original_filename} ({doc.document_type.replace("_", " ")})
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Center: Compare Arrow */}
-        <div className="hidden md:flex items-center justify-center px-4">
-          <div className="w-8 h-8 rounded-full bg-[#121c2e] border border-[#1e2d48] flex items-center justify-center text-slate-400 shadow-inner">
-            <GitCompare className="w-4 h-4 text-slate-300" />
+        <div className="hidden md:flex items-center justify-center px-2">
+          <div className="w-9 h-9 rounded-full bg-[#121c2e] border border-[#1e2d48] flex items-center justify-center text-slate-400 shadow-inner">
+            <GitCompare className="w-4 h-4 text-blue-400" />
           </div>
         </div>
 
-        {/* Right: Target Document Selector */}
+        {/* Right: Document B (Target) */}
         <div className="flex-1 md:max-w-md">
-          <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-            Compare Against Document:
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              Document B (Compare With):
+            </label>
+            {activeTargetDoc && (
+              <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                {activeTargetDoc.document_type.replace("_", " ")}
+              </span>
+            )}
+          </div>
           <select
-            value={targetDocId}
-            onChange={(e) => setTargetDocId(e.target.value)}
+            value={selectedTargetDocId}
+            onChange={(e) => setSelectedTargetDocId(e.target.value)}
             disabled={availableTargetDocs.length === 0}
             className="w-full px-3 py-2 rounded-xl bg-[#080d1a] border border-[#1e293b] text-white text-xs font-medium focus:outline-none focus:border-blue-500 disabled:opacity-50"
           >
             {availableTargetDocs.length === 0 ? (
-              <option value="">No other documents available to compare</option>
+              <option value="">No other documents available</option>
             ) : (
               availableTargetDocs.map((doc) => (
                 <option key={doc.id} value={doc.id}>
@@ -493,7 +534,7 @@ export default function DocumentDiffView({
                     Field / Line Item
                   </th>
                   <th scope="col" className="px-5 py-3.5">
-                    {baseDocumentName} (This Document)
+                    {activeBaseDoc?.original_filename || baseDocumentName || "Document A"}
                   </th>
                   <th scope="col" className="px-5 py-3.5">
                     {activeTargetDoc?.original_filename || "Compared Document"}

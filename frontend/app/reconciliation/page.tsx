@@ -20,8 +20,11 @@ import {
   RefreshCw,
   X,
   FileCheck,
+  GitCompare,
+  CheckSquare,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
+import DocumentDiffView from "@/components/documents/DocumentDiffView";
 import { useAuditor } from "@/lib/auditor-session";
 import { useDemoFilter } from "@/lib/demo-filter-context";
 import {
@@ -41,6 +44,7 @@ export default function ReconciliationPage() {
   const [pageSize] = useState(15);
   const [search, setSearch] = useState("");
   const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"queue" | "diff">("queue");
 
   // Match decision modal state
   const [decisionModalMatch, setDecisionModalMatch] = useState<{
@@ -166,6 +170,32 @@ export default function ReconciliationPage() {
           </div>
 
           <div className="flex items-center space-x-3">
+            {/* View Mode Switcher */}
+            <div className="flex items-center space-x-1 bg-[#0c1322] border border-[#1e293b] p-1 rounded-xl shadow-sm">
+              <button
+                onClick={() => setViewMode("queue")}
+                className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === "queue"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>Reconciliation Queue</span>
+              </button>
+              <button
+                onClick={() => setViewMode("diff")}
+                className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === "diff"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <GitCompare className="w-3.5 h-3.5" />
+                <span>Compare Documents</span>
+              </button>
+            </div>
+
             <button
               onClick={handleExportReport}
               className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-[#111927] hover:bg-[#182338] border border-[#1e2d48] text-xs font-medium text-slate-200 transition-colors shadow-sm"
@@ -183,7 +213,9 @@ export default function ReconciliationPage() {
           </div>
         </div>
 
-        {/* 3 Top Summary Stat Cards matching screenshot */}
+        {viewMode === "queue" ? (
+          <>
+            {/* 3 Top Summary Stat Cards matching screenshot */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-[#0f172a] border border-[#1e293b] rounded-xl p-5 space-y-2 shadow-sm">
             <p className="text-xs font-medium text-slate-400">Open records</p>
@@ -477,6 +509,14 @@ export default function ReconciliationPage() {
                       Decide Match
                     </button>
                   )}
+
+                  <button
+                    onClick={() => setViewMode("diff")}
+                    className="px-3.5 py-2 bg-[#121c2e] hover:bg-[#182742] text-slate-200 border border-[#1e2d48] rounded-lg text-xs font-medium transition-colors inline-flex items-center space-x-1.5"
+                  >
+                    <GitCompare className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Compare Documents</span>
+                  </button>
                 </div>
               </>
             ) : (
@@ -486,7 +526,11 @@ export default function ReconciliationPage() {
             )}
           </div>
         </div>
-      </div>
+      </>
+    ) : (
+      <DocumentDiffView />
+    )}
+  </div>
 
       {/* Human Match Decision Modal */}
       {decisionModalMatch && (
